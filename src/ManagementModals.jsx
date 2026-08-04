@@ -12,6 +12,7 @@ const LS = {
   paymentTerms: "easyinvoice_paymentTerms",
   itemNames: "easyinvoice_itemNames",
   qtyUnits: "easyinvoice_qtyUnits",
+  banks: "easyinvoice_banks",
 };
 
 function load(key) {
@@ -45,16 +46,64 @@ function CompanyModal({ onClose, onApply }) {
   const saved = (() => { try { return JSON.parse(localStorage.getItem(pfx(LS.company))) || {}; } catch { return {}; } })();
   const [form, setForm] = useState({ name: saved.name || "", addr1: saved.addr1 || "", addr2: saved.addr2 || "", contact: saved.contact || "", email: saved.email || "", trn: saved.trn || "" });
 
+  const [banksList, setBanksList] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(pfx(LS.banks))) || []; } catch { return []; }
+  });
+  const [bankForm, setBankForm] = useState({ accName: "", bankName: "", accNo: "", iban: "", swift: "", address: "" });
+  const [editingBankIdx, setEditingBankIdx] = useState(null);
+
   const set = (k) => (v) => setForm({ ...form, [k]: v });
+  const setBankField = (k) => (v) => setBankForm({ ...bankForm, [k]: v });
+
+  const addBank = () => {
+    if (!bankForm.accName.trim() || !bankForm.bankName.trim() || !bankForm.accNo.trim()) {
+      alert("Account Name, Bank Name, and Account No are required.");
+      return;
+    }
+    let next;
+    if (editingBankIdx !== null) {
+      next = [...banksList];
+      next[editingBankIdx] = bankForm;
+      setEditingBankIdx(null);
+    } else {
+      next = [...banksList, bankForm];
+    }
+    setBanksList(next);
+    setBankForm({ accName: "", bankName: "", accNo: "", iban: "", swift: "", address: "" });
+  };
+
+  const deleteBank = (idx) => {
+    const pw = prompt("Enter password 'abcd' to delete this bank account:");
+    if (pw !== "abcd") {
+      if (pw !== null) alert("Wrong password!");
+      return;
+    }
+    const next = banksList.filter((_, i) => i !== idx);
+    setBanksList(next);
+    if (editingBankIdx === idx) {
+      setBankForm({ accName: "", bankName: "", accNo: "", iban: "", swift: "", address: "" });
+      setEditingBankIdx(null);
+    }
+  };
+
   const handleSave = () => {
+    let finalBanks = [...banksList];
+    if (bankForm.accName.trim() && bankForm.bankName.trim() && bankForm.accNo.trim()) {
+      if (editingBankIdx !== null) {
+        finalBanks[editingBankIdx] = bankForm;
+      } else {
+        finalBanks.push(bankForm);
+      }
+    }
     localStorage.setItem(pfx(LS.company), JSON.stringify(form));
+    localStorage.setItem(pfx(LS.banks), JSON.stringify(finalBanks));
     onApply(form);
     onClose();
   };
 
   return (
     <div style={modalOverlay} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={modalBox}>
+      <div onClick={(e) => e.stopPropagation()} style={{ ...modalBox, maxWidth: 540 }}>
         <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 800 }}>Manage Company Details</h3>
         <label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>Name</label>
         <input style={inputStyle} value={form.name} onChange={(e) => set("name")(e.target.value)} />
@@ -68,8 +117,60 @@ function CompanyModal({ onClose, onApply }) {
         <input style={inputStyle} value={form.email} onChange={(e) => set("email")(e.target.value)} />
         <label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>TRN VAT</label>
         <input style={inputStyle} value={form.trn} onChange={(e) => set("trn")(e.target.value)} />
-        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-          <button style={btn("#1c1c1c")} onClick={handleSave}>Save</button>
+
+        <hr style={{ margin: "20px 0", border: "0", borderTop: "1px solid #e8e8e8" }} />
+        
+        <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: "#1c1c1c" }}>Manage Bank Accounts</h4>
+        
+        <div style={{ border: "1px solid #e8e8e8", borderRadius: 8, padding: 12, marginBottom: 12, background: "#fafafa" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>{editingBankIdx !== null ? "Edit Bank Account" : "Add Bank Account"}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div>
+              <label style={{ fontSize: 10, color: "#6b6b6b", fontWeight: 600 }}>Account Name</label>
+              <input style={inputStyle} value={bankForm.accName} onChange={(e) => setBankField("accName")(e.target.value)} />
+            </div>
+            <div>
+              <label style={{ fontSize: 10, color: "#6b6b6b", fontWeight: 600 }}>Bank Name</label>
+              <input style={inputStyle} value={bankForm.bankName} onChange={(e) => setBankField("bankName")(e.target.value)} />
+            </div>
+            <div>
+              <label style={{ fontSize: 10, color: "#6b6b6b", fontWeight: 600 }}>Account No</label>
+              <input style={inputStyle} value={bankForm.accNo} onChange={(e) => setBankField("accNo")(e.target.value)} />
+            </div>
+            <div>
+              <label style={{ fontSize: 10, color: "#6b6b6b", fontWeight: 600 }}>IBAN No</label>
+              <input style={inputStyle} value={bankForm.iban} onChange={(e) => setBankField("iban")(e.target.value)} />
+            </div>
+            <div>
+              <label style={{ fontSize: 10, color: "#6b6b6b", fontWeight: 600 }}>Swift No</label>
+              <input style={inputStyle} value={bankForm.swift} onChange={(e) => setBankField("swift")(e.target.value)} />
+            </div>
+            <div>
+              <label style={{ fontSize: 10, color: "#6b6b6b", fontWeight: 600 }}>Address</label>
+              <input style={inputStyle} value={bankForm.address} onChange={(e) => setBankField("address")(e.target.value)} />
+            </div>
+          </div>
+          <button style={btn("#1c1c1c", { marginTop: 4, width: "100%" })} onClick={addBank}>
+            {editingBankIdx !== null ? "Update Bank" : "+ Add Bank"}
+          </button>
+        </div>
+
+        {banksList.map((bk, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", border: "1px solid #eee", borderRadius: 6, marginBottom: 6 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 12 }}>{bk.bankName}</div>
+              <div style={{ fontSize: 11, color: "#666" }}>Acc: {bk.accNo} · Name: {bk.accName}</div>
+            </div>
+            <div style={{ display: "flex", gap: 4 }}>
+              <button style={{ padding: "4px 8px", fontSize: 10, border: "1px solid #d4d4d4", borderRadius: 4, background: "#fff" }} onClick={() => { setBankForm(bk); setEditingBankIdx(i); }}>Edit</button>
+              <button style={{ padding: "4px 6px", fontSize: 10, border: "1px solid #d4d4d4", borderRadius: 4, background: "#fff", color: "#b3261e" }} onClick={() => deleteBank(i)}>Del</button>
+            </div>
+          </div>
+        ))}
+        {banksList.length === 0 && <p style={{ color: "#888", fontSize: 11, margin: "5px 0" }}>No saved bank accounts yet.</p>}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <button style={btn("#1c1c1c")} onClick={handleSave}>Save All</button>
           <button style={{ ...btn("#888"), background: "#fff", color: "#333", border: "1px solid #d4d4d4" }} onClick={onClose}>Cancel</button>
         </div>
       </div>
@@ -103,6 +204,11 @@ function CustomersModal({ onClose, onSelect }) {
 
   const editCustomer = (i) => { setForm(list[i]); setEditing(i); };
   const deleteCustomer = (i) => {
+    const pw = prompt("Enter password 'abcd' to delete this customer:");
+    if (pw !== "abcd") {
+      if (pw !== null) alert("Wrong password!");
+      return;
+    }
     const next = list.filter((_, idx) => idx !== i);
     setList(next);
     save(LS.customers, next);
@@ -165,21 +271,66 @@ function OtherDetailsModal({ onClose }) {
   const active = TABS.find((t) => t.key === tab);
   const [items, setItems] = useState(() => load(active.storageKey));
   const [newItem, setNewItem] = useState("");
+  const [newCurrCode, setNewCurrCode] = useState("");
+  const [newCurrSubunit, setNewCurrSubunit] = useState("");
+  const [editingIdx, setEditingIdx] = useState(null);
 
-  useEffect(() => { setItems(load(active.storageKey)); setNewItem(""); }, [tab]);
+  useEffect(() => { 
+    setItems(load(active.storageKey)); 
+    setNewItem(""); 
+    setNewCurrCode(""); 
+    setNewCurrSubunit(""); 
+    setEditingIdx(null); 
+  }, [tab]);
 
   const addItem = () => {
     if (!newItem.trim()) return;
-    const next = [...items, newItem.trim()];
+    let next;
+    if (editingIdx !== null) {
+      next = [...items];
+      next[editingIdx] = newItem.trim();
+      setEditingIdx(null);
+    } else {
+      next = [...items, newItem.trim()];
+    }
     setItems(next);
     save(active.storageKey, next);
     setNewItem("");
   };
 
+  const addCurrencyItem = () => {
+    if (!newCurrCode.trim()) return;
+    const cleanCode = newCurrCode.trim().toUpperCase();
+    const cleanSub = newCurrSubunit.trim() || "CENTS";
+    let next;
+    if (editingIdx !== null) {
+      next = [...items];
+      next[editingIdx] = { code: cleanCode, subunit: cleanSub };
+      setEditingIdx(null);
+    } else {
+      next = [...items, { code: cleanCode, subunit: cleanSub }];
+    }
+    setItems(next);
+    save(active.storageKey, next);
+    setNewCurrCode("");
+    setNewCurrSubunit("");
+  };
+
   const removeItem = (i) => {
+    const pw = prompt(`Enter password 'abcd' to delete this ${active.label.toLowerCase()} item:`);
+    if (pw !== "abcd") {
+      if (pw !== null) alert("Wrong password!");
+      return;
+    }
     const next = items.filter((_, idx) => idx !== i);
     setItems(next);
     save(active.storageKey, next);
+    if (editingIdx === i) {
+      setNewItem("");
+      setNewCurrCode("");
+      setNewCurrSubunit("");
+      setEditingIdx(null);
+    }
   };
 
   return (
@@ -199,21 +350,61 @@ function OtherDetailsModal({ onClose }) {
         </div>
 
         {/* Add new */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-          <input style={{ ...inputStyle, marginBottom: 0, flex: 1 }} placeholder={`Add new ${active.label.toLowerCase()}...`}
-            value={newItem} onChange={(e) => setNewItem(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && addItem()} />
-          <button style={btn("#1c1c1c")} onClick={addItem}>+ Add</button>
-        </div>
+        {tab === "currencies" ? (
+          <div style={{ display: "flex", gap: 6, marginBottom: 12, alignItems: "flex-end" }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>Currency Code</label>
+              <input style={{ ...inputStyle, marginBottom: 0 }} placeholder="e.g. USD, AED"
+                value={newCurrCode} onChange={(e) => setNewCurrCode(e.target.value)} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>Subunit (After Decimal)</label>
+              <input style={{ ...inputStyle, marginBottom: 0 }} placeholder="e.g. Cents, Fils"
+                value={newCurrSubunit} onChange={(e) => setNewCurrSubunit(e.target.value)} />
+            </div>
+            <button style={btn("#1c1c1c")} onClick={addCurrencyItem}>
+              {editingIdx !== null ? "Update" : "+ Add"}
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            <input style={{ ...inputStyle, marginBottom: 0, flex: 1 }} placeholder={`Add new ${active.label.toLowerCase()}...`}
+              value={newItem} onChange={(e) => setNewItem(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addItem()} />
+            <button style={btn("#1c1c1c")} onClick={addItem}>
+              {editingIdx !== null ? "Update" : "+ Add"}
+            </button>
+          </div>
+        )}
 
         {/* List */}
         {items.length === 0 && <p style={{ color: "#888", fontSize: 12 }}>No items yet.</p>}
-        {items.map((item, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #eee" }}>
-            <span style={{ fontSize: 13 }}>{item}</span>
-            <button style={{ padding: "2px 8px", fontSize: 11, border: "1px solid #d4d4d4", borderRadius: 4, background: "#fff", color: "#b3261e" }} onClick={() => removeItem(i)}>✕</button>
-          </div>
-        ))}
+        {items.map((item, i) => {
+          const displayVal = typeof item === "string" ? item : `${item.code} (Subunit: ${item.subunit})`;
+          return (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #eee" }}>
+              <span style={{ fontSize: 13 }}>{displayVal}</span>
+              <div style={{ display: "flex", gap: 4 }}>
+                <button 
+                  style={{ padding: "2px 8px", fontSize: 11, border: "1px solid #d4d4d4", borderRadius: 4, background: "#fff", cursor: "pointer" }} 
+                  onClick={() => {
+                    setEditingIdx(i);
+                    if (tab === "currencies") {
+                      setNewCurrCode(typeof item === "string" ? item : item.code);
+                      setNewCurrSubunit(typeof item === "string" ? "CENTS" : item.subunit);
+                    } else {
+                      setNewItem(item);
+                    }
+                  }}
+                  title="Edit"
+                >
+                  ✏️
+                </button>
+                <button style={{ padding: "2px 8px", fontSize: 11, border: "1px solid #d4d4d4", borderRadius: 4, background: "#fff", color: "#b3261e", cursor: "pointer" }} onClick={() => removeItem(i)}>✕</button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -427,7 +618,7 @@ function TeamMembersModal({ onClose }) {
 function pfx(key) { return (typeof _mgmtUid !== "undefined" ? _mgmtUid + "_" : "") + key; }
 let _mgmtUid = "";
 
-export default function ManagementMenu({ uid, onCompany, onCustomer, sellers, setSellers }) {
+export default function ManagementMenu({ uid, onCompany, onCustomer, sellers, setSellers, setBuyer }) {
   _mgmtUid = uid || "";
   const [open, setOpen] = useState(false);
   const [modal, setModal] = useState(null); // 'company' | 'customers' | 'other' | 'settings' | 'team'
@@ -445,9 +636,17 @@ export default function ManagementMenu({ uid, onCompany, onCustomer, sellers, se
   };
 
   const handleCustomerSelect = (data) => {
-    setSellers({ ...sellers, name: data.name, addr1: data.addr1, addr2: data.addr2, trn: data.gst || sellers.trn });
-    // Also set buyer
-    // We'll pass buyer setter too
+    if (setBuyer) {
+      setBuyer({
+        name: data.name || "",
+        addr1: data.addr1 || "",
+        addr2: data.addr2 || "",
+        gst: data.gst || "",
+        pan: data.pan || "",
+        contact: data.contact || "",
+        email: data.email || "",
+      });
+    }
   };
 
   return (
@@ -530,7 +729,7 @@ export default function ManagementMenu({ uid, onCompany, onCustomer, sellers, se
 
       {/* Modals */}
       {modal === "company" && <CompanyModal onClose={() => setModal(null)} onApply={handleCompanyApply} />}
-      {modal === "customers" && <CustomersModal onClose={() => setModal(null)} />}
+      {modal === "customers" && <CustomersModal onClose={() => setModal(null)} onSelect={handleCustomerSelect} />}
       {modal === "other" && <OtherDetailsModal onClose={() => setModal(null)} />}
       {modal === "settings" && <SettingsModal onClose={() => setModal(null)} />}
       {modal === "team" && <TeamMembersModal onClose={() => setModal(null)} />}

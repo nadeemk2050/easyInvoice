@@ -10,7 +10,7 @@ const money = (n) =>
 const ones = ["","ONE ","TWO ","THREE ","FOUR ","FIVE ","SIX ","SEVEN ","EIGHT ","NINE ","TEN ","ELEVEN ","TWELVE ","THIRTEEN ","FOURTEEN ","FIFTEEN ","SIXTEEN ","SEVENTEEN ","EIGHTEEN ","NINETEEN "];
 const tens = ["","","TWENTY ","THIRTY ","FORTY ","FIFTY ","SIXTY ","SEVENTY ","EIGHTY ","NINETY "];
 
-export function numToWords(n) {
+export function numToWords(n, currencyName = "", subunitName = "") {
   if (isNaN(n) || n === 0) return "ZERO";
   n = Math.round(n * 100) / 100;
   let whole = Math.floor(n);
@@ -19,8 +19,19 @@ export function numToWords(n) {
   if (whole >= 1000000) { w += ones[Math.floor(whole/1000000)] + "MILLION "; whole %= 1000000; }
   if (whole >= 1000) { w += convertBelow1000(Math.floor(whole/1000)) + "THOUSAND "; whole %= 1000; }
   w += convertBelow1000(whole);
-  if (cents > 0) w += "AND " + convertBelow1000(cents) + "CENTS";
-  return w.trim();
+  
+  const curr = (currencyName || "").trim().toUpperCase();
+  const sub = (subunitName || "CENTS").trim().toUpperCase();
+  
+  let result = w.trim();
+  if (curr) {
+    result += " " + curr;
+  }
+  if (cents > 0) {
+    result += " AND " + convertBelow1000(cents).trim() + " " + sub;
+  }
+  return result.trim();
+
   function convertBelow1000(num) {
     let s = "";
     if (num >= 100) { s += ones[Math.floor(num/100)] + "HUNDRED "; num %= 100; }
@@ -198,23 +209,43 @@ export async function generateInvoicePdf(invoiceData) {
   }
 
   function borderedBlock(x, w, lines, opts = {}) {
+    const fontSize = opts.fontSize || 8;
     const lineH = opts.lineH || 5;
     const headingH = lineH + 1; // slightly taller heading bar
-    const h = lines.length * lineH + 1;
-    // Grey background behind first line (heading) if it's bold
-    if (lines[0]?.bold) {
+    
+    const processedLines = [];
+    lines.forEach((line, i) => {
+      setFont(fontSize, line.bold ? "bold" : "normal");
+      const textStr = (line.text || "").trim();
+      if (i === 0) {
+        processedLines.push({ text: textStr, bold: line.bold });
+      } else {
+        const wrapped = doc.splitTextToSize(textStr, w - 3);
+        if (wrapped.length > 0) {
+          wrapped.forEach((wl) => {
+            processedLines.push({ text: wl, bold: line.bold });
+          });
+        } else {
+          processedLines.push({ text: "", bold: line.bold });
+        }
+      }
+    });
+
+    const h = processedLines.length * lineH + 1;
+    if (processedLines[0]?.bold) {
       doc.setFillColor(233, 233, 233);
       doc.rect(x, y, w, headingH, "F");
     }
     doc.setDrawColor(0);
     doc.rect(x, y, w, h, "S");
-    lines.forEach((line, i) => {
-      setFont(opts.fontSize || 8, line.bold ? "bold" : "normal");
+    
+    processedLines.forEach((line, i) => {
+      setFont(fontSize, line.bold ? "bold" : "normal");
       const ly = i === 0 ? y + headingH / 2 : y + headingH + (i - 1) * lineH + lineH / 2;
       doc.text(
         line.text,
         x + 1.5,
-        ly + (opts.fontSize || 8) * 0.35,
+        ly + fontSize * 0.17,
         { maxWidth: w - 3 }
       );
     });
@@ -262,14 +293,14 @@ export async function generateInvoicePdf(invoiceData) {
   // --- SELLER block (left) ---
   const sellerLines = [
     { text: "SELLER", bold: true },
-    { text: seller.name, bold: true },
-    { text: seller.addr1 },
-    { text: seller.addr2 },
-    { text: `TRN NO : ${seller.trn}` },
-    { text: `CONTACT PERSON ${seller.contactPerson}` },
-    { text: `CONTACT : ${seller.contact}` },
-    { text: `EMAIL ${seller.email}` },
   ];
+  if (seller.name) sellerLines.push({ text: seller.name, bold: true });
+  if (seller.addr1) sellerLines.push({ text: seller.addr1 });
+  if (seller.addr2) sellerLines.push({ text: seller.addr2 });
+  if (seller.trn) sellerLines.push({ text: `TRN NO : ${seller.trn}` });
+  if (seller.contact) sellerLines.push({ text: `CONTACT : ${seller.contact}` });
+  if (seller.email) sellerLines.push({ text: `EMAIL : ${seller.email}` });
+  
   borderedBlock(ml, colLeft, sellerLines, { lineH: 4.0, fontSize: 7.5 });
 
   const sellerBlockEnd = y;
@@ -389,27 +420,39 @@ export async function generateInvoicePdf(invoiceData) {
   // --- BUYER block (left) ---
   const buyerLines = [
     { text: "BUYER / CONSIGNEE", bold: true },
-    { text: buyer.name, bold: true },
-    { text: buyer.addr1 },
-    { text: buyer.addr2 },
-    { text: `GST ${buyer.gst}` },
-    { text: `PAN ${buyer.pan}` },
-    { text: `CONTACT ${buyer.contact}` },
-    { text: `EMAIL ${buyer.email}` },
   ];
+  if (buyer.name) buyerLines.push({ text: buyer.name, bold: true });
+  if (buyer.addr1) buyerLines.push({ text: buyer.addr1 });
+  if (buyer.addr2) buyerLines.push({ text: buyer.addr2 });
+  
+  let gstPanParts = [];
+  if (buyer.gst) gstPanParts.push(`GST: ${buyer.gst}`);
+  if (buyer.pan) gstPanParts.push(`PAN: ${buyer.pan}`);
+  if (gstPanParts.length > 0) {
+    buyerLines.push({ text: gstPanParts.join("     ") });
+  }
+  
+  if (buyer.contact) buyerLines.push({ text: `CONTACT : ${buyer.contact}` });
+  if (buyer.email) buyerLines.push({ text: `EMAIL : ${buyer.email}` });
+  
   borderedBlock(ml, colLeft, buyerLines, { lineH: 4.0, fontSize: 7.5 });
   const buyerBlockEnd = y;
 
   // --- NOTIFY PARTY block (left, under Buyer) — simplified ---
   const notifyLines = [
     { text: "NOTIFY PARTY", bold: true },
-    { text: notifyParty.name || "—", bold: true },
-    { text: notifyParty.addr1 },
-    { text: notifyParty.addr2 },
-    { text: `EMAIL ${notifyParty.email}` },
-    { text: `CONTACT ${notifyParty.contact}` },
   ];
-  borderedBlock(ml, colLeft, notifyLines, { lineH: 4.0, fontSize: 7.5 });
+  if (notifyParty.name && notifyParty.name !== "—") {
+    notifyLines.push({ text: notifyParty.name, bold: true });
+  }
+  if (notifyParty.addr1) notifyLines.push({ text: notifyParty.addr1 });
+  if (notifyParty.addr2) notifyLines.push({ text: notifyParty.addr2 });
+  if (notifyParty.email) notifyLines.push({ text: `EMAIL : ${notifyParty.email}` });
+  if (notifyParty.contact) notifyLines.push({ text: `CONTACT : ${notifyParty.contact}` });
+
+  if (notifyLines.length > 1) {
+    borderedBlock(ml, colLeft, notifyLines, { lineH: 4.0, fontSize: 7.5 });
+  }
   const notifyBlockEnd = y;
 
   // --- MISC block (right, continues from where meta block ended) ---
@@ -574,7 +617,7 @@ export async function generateInvoicePdf(invoiceData) {
   const totalsStartY = y;
 
   // --- AMOUNT IN WORDS (left, auto-filled from total) ---
-  const autoWords = meta.amountInWords || numToWords(totalInclVat) + " " + (meta.currency || "");
+  const autoWords = meta.amountInWords || numToWords(totalInclVat, meta.currency, meta.subunit);
   const wordsLinesArr = doc.splitTextToSize(autoWords, colLeft - 2);
   const wordsH = Math.max(12, wordsLinesArr.length * 4 + 6);
   doc.setDrawColor(0);

@@ -79,9 +79,9 @@ function loadList(key) {
   try { return JSON.parse(localStorage.getItem(_key(key))) || []; } catch { return []; }
 }
 
-function field(label, value, onChange, placeholder, small, listId) {
+function field(label, value, onChange, placeholder, small, listId, disabled) {
   return (
-    <label style={{ display: "block", marginBottom: 8 }}>
+    <label style={{ display: "block", marginBottom: 8, opacity: disabled ? 0.7 : 1 }}>
       <span
         style={{
           fontSize: 11,
@@ -90,12 +90,13 @@ function field(label, value, onChange, placeholder, small, listId) {
           letterSpacing: 0.3,
         }}
       >
-        {label}
+        {label} {disabled && "(Change in Menu)"}
       </span>
       <input
         value={value}
         placeholder={placeholder}
         list={listId}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         style={{
           display: "block",
@@ -108,13 +109,15 @@ function field(label, value, onChange, placeholder, small, listId) {
           outline: "none",
           fontFamily: "inherit",
           boxSizing: "border-box",
+          backgroundColor: disabled ? "#f5f5f5" : "#fff",
+          cursor: disabled ? "not-allowed" : "text",
         }}
       />
     </label>
   );
 }
 
-function CustomerDropdown({ value, onChange, onAddNew }) {
+function CustomerDropdown({ value, onChange, onAddNew, onSelect }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const ref = useRef(null);
@@ -135,7 +138,16 @@ function CustomerDropdown({ value, onChange, onAddNew }) {
   return (
     <label ref={ref} style={{ display: "block", marginBottom: 8, position: "relative" }}>
       <span style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600, letterSpacing: 0.3 }}>Name</span>
-      <input value={value} onChange={(e) => { onChange(e.target.value); setOpen(true); setSearch(e.target.value); }}
+      <input value={value} onChange={(e) => {
+        const val = e.target.value;
+        onChange(val);
+        setOpen(true);
+        setSearch(val);
+        const exactMatch = customers.find(c => c.name?.toLowerCase() === val.toLowerCase());
+        if (exactMatch && onSelect) {
+          onSelect(exactMatch);
+        }
+      }}
         onFocus={() => setOpen(true)}
         placeholder="Type or select customer"
         style={{ display: "block", width: "100%", marginTop: 3, padding: "7px 8px", fontSize: 13,
@@ -149,7 +161,7 @@ function CustomerDropdown({ value, onChange, onAddNew }) {
               style={{ width: "100%", padding: "5px 6px", fontSize: 12, border: "1px solid #ddd", borderRadius: 4, outline: "none", boxSizing: "border-box" }} />
           </div>
           {filtered.map((c, i) => (
-            <div key={i} onMouseDown={() => { onChange(c.name); setOpen(false); }}
+            <div key={i} onMouseDown={() => { if (onSelect) { onSelect(c); } else { onChange(c.name); } setOpen(false); }}
               style={{ padding: "7px 10px", cursor: "pointer", borderBottom: "1px solid #f5f5f5", fontSize: 13 }}
               onMouseEnter={(e) => e.target.style.background = "#f0f0f0"}
               onMouseLeave={(e) => e.target.style.background = "#fff"}>
@@ -296,6 +308,7 @@ export default function App() {
       "40 JUMBO BAGS ON 40 PALLETS STRAPPED\nCONT NO MRSU9998798, SEAL ML-AE88786688",
     paymentTerms: "30% ADVANCE PAID ON BL\n35% ON LOADING AND SO N\n35% WILL PAY UPON DELIVERY",
     currency: "USD",
+    subunit: "CENTS",
     originOfGoods: "U.A.E",
     amountInWords: "",
   });
@@ -398,8 +411,8 @@ export default function App() {
   const balance = totalInclVat - advanceAmt;
 
   const autoWords = useMemo(() => {
-    return numToWords(totalInclVat) + " " + (meta.currency || "");
-  }, [totalInclVat, meta.currency]);
+    return numToWords(totalInclVat, meta.currency, meta.subunit);
+  }, [totalInclVat, meta.currency, meta.subunit]);
 
   const fmtDate = (iso) => {
     if (!iso) return "";
@@ -574,6 +587,21 @@ export default function App() {
         if (savedTitleX) setTitleXOffset(parseFloat(savedTitleX));
         const savedTitleY = localStorage.getItem(_uid + "_easyinvoice_titleYOffset");
         if (savedTitleY) setTitleYOffset(parseFloat(savedTitleY));
+
+        const savedBanks = localStorage.getItem(_uid + "_easyinvoice_banks");
+        if (savedBanks) {
+          const banks = JSON.parse(savedBanks);
+          if (Array.isArray(banks) && banks.length > 0) {
+            setBank({
+              accName: banks[0].accName || "",
+              bankName: banks[0].bankName || "",
+              accNo: banks[0].accNo || "",
+              iban: banks[0].iban || "",
+              swift: banks[0].swift || "",
+              address: banks[0].address || "",
+            });
+          }
+        }
       } catch {}
       setHistory(loadHistory());
     }
@@ -739,6 +767,7 @@ export default function App() {
   const dlItemNames = loadList("easyinvoice_itemNames");
   const dlQtyUnits = loadList("easyinvoice_qtyUnits");
   const dlCustomers = loadList("easyinvoice_customers");
+  const dlBanks = loadList("easyinvoice_banks");
 
   // ---------- render ----------
   return (
@@ -750,7 +779,7 @@ export default function App() {
       }}
     >
       {/* Datalists for autocomplete */}
-      <datalist id="dl-currency">{dlCurrencies.map((c, i) => <option key={i} value={c} />)}</datalist>
+      <datalist id="dl-currency">{dlCurrencies.map((c, i) => <option key={i} value={typeof c === "string" ? c : c.code} />)}</datalist>
       <datalist id="dl-loading">{dlLoading.map((c, i) => <option key={i} value={c} />)}</datalist>
       <datalist id="dl-finalDest">{dlFinalDest.map((c, i) => <option key={i} value={c} />)}</datalist>
       <datalist id="dl-origins">{dlOrigins.map((c, i) => <option key={i} value={c} />)}</datalist>
@@ -842,7 +871,7 @@ export default function App() {
               </p>
             </div>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} />
+              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} />
               <button
                 onClick={() => setShowHistory(false)}
                 style={{
@@ -906,7 +935,14 @@ export default function App() {
                             style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }} title="Edit Invoice">✏️ Edit</button>
                           <button onClick={() => downloadFromHistory(inv)}
                             style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }} title="Download PDF">⬇️ PDF</button>
-                          <button onClick={() => { if(confirm("Are you sure you want to delete this invoice?")) deleteHistoryItem(i); }}
+                           <button onClick={() => { 
+                            const pw = prompt("Enter password 'abcd' to delete this invoice:");
+                            if (pw === "abcd") {
+                              deleteHistoryItem(i);
+                            } else if (pw !== null) {
+                              alert("Wrong password!");
+                            }
+                          }}
                             style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #ffcdd2", borderRadius: 6, background: "#ffe9e9", cursor: "pointer", color: "#b3261e" }} title="Delete">🗑️</button>
                         </div>
                       </div>
@@ -954,7 +990,7 @@ export default function App() {
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} />
+              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} />
               <button
                 onClick={() => setShowHistory(true)}
                 style={{
@@ -1383,9 +1419,17 @@ export default function App() {
             {textArea("Payment Terms", meta.paymentTerms, (v) =>
               setMeta({ ...meta, paymentTerms: v })
             , "dl-paymentTerms")}
-            {field("Currency", meta.currency, (v) =>
-              setMeta({ ...meta, currency: v })
-            , "", true, "dl-currency")}
+            {field("Currency", meta.currency, (v) => {
+              const upperV = v.toUpperCase();
+              const matched = dlCurrencies.find(c => 
+                (typeof c === "string" ? c : c.code)?.toUpperCase() === upperV
+              );
+              const sub = matched && typeof matched === "object" ? matched.subunit : (meta.subunit || "CENTS");
+              setMeta({ ...meta, currency: v, subunit: sub });
+            }, "", true, "dl-currency")}
+            {field("Currency Subunit (e.g. Fils, Cent, Paisa)", meta.subunit || "", (v) =>
+              setMeta({ ...meta, subunit: v })
+            , "e.g. Cents", true)}
             {textArea("Amount In Words", meta.amountInWords, (v) =>
               setMeta({ ...meta, amountInWords: v })
             , "", autoWords)}
@@ -1394,29 +1438,35 @@ export default function App() {
           <Section title="Seller">
             {field("Name", seller.name, (v) =>
               setSeller({ ...seller, name: v })
-            )}
+            , "", false, null, true)}
             {field("Address line 1", seller.addr1, (v) =>
               setSeller({ ...seller, addr1: v })
-            )}
+            , "", false, null, true)}
             {field("Address line 2", seller.addr2, (v) =>
               setSeller({ ...seller, addr2: v })
-            )}
+            , "", false, null, true)}
             {field("TRN No", seller.trn, (v) =>
               setSeller({ ...seller, trn: v })
-            )}
-            {field("Contact Person", seller.contactPerson, (v) =>
-              setSeller({ ...seller, contactPerson: v })
-            )}
+            , "", false, null, true)}
             {field("Contact", seller.contact, (v) =>
               setSeller({ ...seller, contact: v })
-            )}
+            , "", false, null, true)}
             {field("Email", seller.email, (v) =>
               setSeller({ ...seller, email: v })
-            )}
+            , "", false, null, true)}
           </Section>
 
           <Section title="Buyer / Consignee">
             <CustomerDropdown value={buyer.name} onChange={(v) => setBuyer({ ...buyer, name: v })}
+              onSelect={(c) => setBuyer({
+                name: c.name || "",
+                addr1: c.addr1 || "",
+                addr2: c.addr2 || "",
+                gst: c.gst || "",
+                pan: c.pan || "",
+                contact: c.contact || "",
+                email: c.email || "",
+              })}
               onAddNew={() => { const btn = document.querySelector('button[title="Menu"]'); if(btn) btn.click(); setTimeout(() => { document.querySelectorAll('button').forEach(b => { if(b.textContent.includes('Manage Customers')) b.click(); }); }, 100); }} />
             {field("Address line 1", buyer.addr1, (v) =>
               setBuyer({ ...buyer, addr1: v })
@@ -1435,7 +1485,14 @@ export default function App() {
           </Section>
 
           <Section title="Notify Party">
-            <CustomerDropdown value={notifyParty.name} onChange={(v) => setNotifyParty({ ...notifyParty, name: v })} />
+            <CustomerDropdown value={notifyParty.name} onChange={(v) => setNotifyParty({ ...notifyParty, name: v })}
+              onSelect={(c) => setNotifyParty({
+                name: c.name || "",
+                addr1: c.addr1 || "",
+                addr2: c.addr2 || "",
+                email: c.email || "",
+                contact: c.contact || "",
+              })} />
             {field("Address line 1", notifyParty.addr1, (v) =>
               setNotifyParty({ ...notifyParty, addr1: v })
             )}
@@ -1526,6 +1583,33 @@ export default function App() {
           </Section>
 
           <Section title="Bank details">
+            {dlBanks && dlBanks.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>Select Saved Bank</label>
+                <select 
+                  onChange={(e) => {
+                    const idx = e.target.value;
+                    if (idx !== "") {
+                      const selected = dlBanks[idx];
+                      setBank({
+                        accName: selected.accName || "",
+                        bankName: selected.bankName || "",
+                        accNo: selected.accNo || "",
+                        iban: selected.iban || "",
+                        swift: selected.swift || "",
+                        address: selected.address || "",
+                      });
+                    }
+                  }}
+                  style={{ display: "block", width: "100%", marginTop: 3, padding: "7px 8px", fontSize: 13, border: "1px solid #d4d4d4", borderRadius: 5, outline: "none", background: "#fff", fontFamily: "inherit" }}
+                >
+                  <option value="">-- Choose a Saved Bank --</option>
+                  {dlBanks.map((bk, idx) => (
+                    <option key={idx} value={idx}>{bk.bankName} ({bk.accNo})</option>
+                  ))}
+                </select>
+              </div>
+            )}
             {field("Account Name", bank.accName, (v) =>
               setBank({ ...bank, accName: v })
             )}
@@ -1700,29 +1784,36 @@ export default function App() {
                   </div>
                   <table style={{ width: "100%", borderCollapse: "collapse", borderRadius: 3 }}>
                     <tbody>
-                      <tr>
-                        <td style={td({ fontWeight: 700 })}>{seller.name}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>{seller.addr1}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>{seller.addr2}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>TRN NO : {seller.trn}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>
-                          CONTACT PERSON {seller.contactPerson}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>CONTACT : {seller.contact}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>EMAIL {seller.email}</td>
-                      </tr>
+                      {seller.name && (
+                        <tr>
+                          <td style={td({ fontWeight: 700 })}>{seller.name}</td>
+                        </tr>
+                      )}
+                      {seller.addr1 && (
+                        <tr>
+                          <td style={td()}>{seller.addr1}</td>
+                        </tr>
+                      )}
+                      {seller.addr2 && (
+                        <tr>
+                          <td style={td()}>{seller.addr2}</td>
+                        </tr>
+                      )}
+                      {seller.trn && (
+                        <tr>
+                          <td style={td()}>TRN NO : {seller.trn}</td>
+                        </tr>
+                      )}
+                      {seller.contact && (
+                        <tr>
+                          <td style={td()}>CONTACT : {seller.contact}</td>
+                        </tr>
+                      )}
+                      {seller.email && (
+                        <tr>
+                          <td style={td()}>EMAIL : {seller.email}</td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </td>
@@ -1884,27 +1975,40 @@ export default function App() {
                   </div>
                   <table style={{ width: "100%", borderCollapse: "collapse", borderRadius: 3 }}>
                     <tbody>
-                      <tr>
-                        <td style={td({ fontWeight: 700 })}>{buyer.name}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>{buyer.addr1}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>{buyer.addr2}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>GST {buyer.gst}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>PAN {buyer.pan}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>CONTACT {buyer.contact}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>EMAIL {buyer.email}</td>
-                      </tr>
+                      {buyer.name && (
+                        <tr>
+                          <td style={td({ fontWeight: 700 })}>{buyer.name}</td>
+                        </tr>
+                      )}
+                      {buyer.addr1 && (
+                        <tr>
+                          <td style={td()}>{buyer.addr1}</td>
+                        </tr>
+                      )}
+                      {buyer.addr2 && (
+                        <tr>
+                          <td style={td()}>{buyer.addr2}</td>
+                        </tr>
+                      )}
+                      {(buyer.gst || buyer.pan) && (
+                        <tr>
+                          <td style={td()}>
+                            {buyer.gst && `GST: ${buyer.gst}`}
+                            {buyer.gst && buyer.pan && "     "}
+                            {buyer.pan && `PAN: ${buyer.pan}`}
+                          </td>
+                        </tr>
+                      )}
+                      {buyer.contact && (
+                        <tr>
+                          <td style={td()}>CONTACT : {buyer.contact}</td>
+                        </tr>
+                      )}
+                      {buyer.email && (
+                        <tr>
+                          <td style={td()}>EMAIL : {buyer.email}</td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                   {/* Notify Party under Buyer — hidden when empty */}
@@ -1926,21 +2030,31 @@ export default function App() {
                   </div>
                   <table style={{ width: "100%", borderCollapse: "collapse", borderRadius: 3 }}>
                     <tbody>
-                      <tr>
-                        <td style={td({ fontWeight: 700 })}>{notifyParty.name}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>{notifyParty.addr1}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>{notifyParty.addr2}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>EMAIL {notifyParty.email}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>CONTACT {notifyParty.contact}</td>
-                      </tr>
+                      {notifyParty.name && notifyParty.name !== "—" && (
+                        <tr>
+                          <td style={td({ fontWeight: 700 })}>{notifyParty.name}</td>
+                        </tr>
+                      )}
+                      {notifyParty.addr1 && (
+                        <tr>
+                          <td style={td()}>{notifyParty.addr1}</td>
+                        </tr>
+                      )}
+                      {notifyParty.addr2 && (
+                        <tr>
+                          <td style={td()}>{notifyParty.addr2}</td>
+                        </tr>
+                      )}
+                      {notifyParty.email && (
+                        <tr>
+                          <td style={td()}>EMAIL : {notifyParty.email}</td>
+                        </tr>
+                      )}
+                      {notifyParty.contact && (
+                        <tr>
+                          <td style={td()}>CONTACT : {notifyParty.contact}</td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                     </>
