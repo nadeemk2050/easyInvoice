@@ -1,0 +1,698 @@
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+
+const money = (n) =>
+  (isNaN(n) ? 0 : n).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+const ones = ["","ONE ","TWO ","THREE ","FOUR ","FIVE ","SIX ","SEVEN ","EIGHT ","NINE ","TEN ","ELEVEN ","TWELVE ","THIRTEEN ","FOURTEEN ","FIFTEEN ","SIXTEEN ","SEVENTEEN ","EIGHTEEN ","NINETEEN "];
+const tens = ["","","TWENTY ","THIRTY ","FORTY ","FIFTY ","SIXTY ","SEVENTY ","EIGHTY ","NINETY "];
+
+export function numToWords(n) {
+  if (isNaN(n) || n === 0) return "ZERO";
+  n = Math.round(n * 100) / 100;
+  let whole = Math.floor(n);
+  const cents = Math.round((n - whole) * 100);
+  let w = "";
+  if (whole >= 1000000) { w += ones[Math.floor(whole/1000000)] + "MILLION "; whole %= 1000000; }
+  if (whole >= 1000) { w += convertBelow1000(Math.floor(whole/1000)) + "THOUSAND "; whole %= 1000; }
+  w += convertBelow1000(whole);
+  if (cents > 0) w += "AND " + convertBelow1000(cents) + "CENTS";
+  return w.trim();
+  function convertBelow1000(num) {
+    let s = "";
+    if (num >= 100) { s += ones[Math.floor(num/100)] + "HUNDRED "; num %= 100; }
+    if (num >= 20) { s += tens[Math.floor(num/10)]; num %= 10; }
+    if (num > 0) s += ones[num];
+    return s;
+  }
+}
+
+/**
+ * Generate a pure-jsPDF invoice. Draws everything with text/lines/tables
+ * so it's 100% reliable — no html2canvas, no CSP issues, no hidden iframes.
+ */
+function getImageFormat(dataUrl) {
+  if (!dataUrl) return "PNG";
+  const match = dataUrl.match(/^data:image\/(\w+);base64/);
+  if (match && match[1]) {
+    const ext = match[1].toLowerCase();
+    if (ext === "jpg" || ext === "jpeg") return "JPEG";
+    if (ext === "png") return "PNG";
+    if (ext === "webp") return "WEBP";
+  }
+  return "PNG";
+}
+
+function removeTransparency(dataUrl) {
+  return new Promise((resolve) => {
+    if (!dataUrl) {
+      resolve(null);
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+        // Fill white background
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Draw the image on top
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL("image/jpeg", 0.95));
+      } catch (err) {
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = () => {
+      resolve(dataUrl);
+    };
+    img.src = dataUrl;
+  });
+}
+
+export async function generateInvoicePdf(invoiceData) {
+  const {
+    seller,
+    buyer,
+    notifyParty = { name: "", addr1: "", addr2: "", email: "", contact: "" },
+    meta,
+    bank,
+    items,
+    vatPercent,
+    advancePercent,
+    logo,
+    signature,
+    stamp,
+    logoWidth = 50,
+    logoHeight = 14,
+    sigWidth = 35,
+    sigHeight = 12,
+    stampWidth = 36,
+    stampHeight = 18,
+    titleText = "COMMERCIAL INVOICE",
+    titleFontSize = 16,
+    titleAlign = "right",
+    titleXOffset = 0,
+    titleYOffset = 0,
+  } = invoiceData;
+
+  const cleanLogo = logo ? await removeTransparency(logo) : null;
+  const cleanSignature = signature ? await removeTransparency(signature) : null;
+  const cleanStamp = stamp ? await removeTransparency(stamp) : null;
+
+  // Calculations
+  const totalQty = items.reduce(
+    (s, it) => s + (parseFloat(it.qty) || 0),
+    0
+  );
+  const subtotal = items.reduce(
+    (s, it) =>
+      s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0),
+    0
+  );
+  const vatAmount = (subtotal * (parseFloat(vatPercent) || 0)) / 100;
+  const totalInclVat = subtotal + vatAmount;
+  const advanceAmt =
+    (totalInclVat * (parseFloat(advancePercent) || 0)) / 100;
+  const balance = totalInclVat - advanceAmt;
+
+  const fmtDate = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso + "T00:00:00");
+    if (isNaN(d)) return iso;
+    return d
+      .toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "2-digit",
+      })
+      .replace(/ /g, "-");
+  };
+
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  // Global PDF styling: bold dark borders with rounded corners
+  doc.setLineWidth(0.5);
+  doc.setLineCap(1);  // round cap
+  doc.setLineJoin(1); // round join
+  const pw = doc.internal.pageSize.getWidth(); // page width
+  const ml = 10; // margin-left
+  const mr = 10; // margin-right
+  const usable = pw - ml - mr;
+  const colLeft = usable * 0.55;
+  const colRight = usable * 0.45;
+  let y = 12;
+
+  // ---------- helper functions ----------
+  function setFont(size, style) {
+    doc.setFontSize(size);
+    if (style === "bold") doc.setFont("Helvetica", "bold");
+    else if (style === "italic") doc.setFont("Helvetica", "italic");
+    else doc.setFont("Helvetica", "normal");
+  }
+
+  function cell(x, w, h, text, opts = {}) {
+    const {
+      align = "left",
+      font = "normal",
+      size = 8,
+      fill = false,
+      fillColor,
+      border = true,
+      padding = 1,
+      valign = "middle",
+    } = opts;
+    setFont(size, font);
+    if (fill && fillColor) {
+      doc.setFillColor(...fillColor);
+      doc.rect(x, y, w, h, "F");
+    }
+    if (border) {
+      doc.setDrawColor(0);
+      doc.rect(x, y, w, h, "S");
+    }
+    const textX = x + padding;
+    const textY = y + h / 2 + size * 0.35;
+    doc.text(text, align === "right" ? x + w - padding : textX, textY, {
+      align: align === "right" ? "right" : "left",
+      maxWidth: w - padding * 2,
+    });
+  }
+
+  function row(cells, heights = 7) {
+    let x = ml;
+    cells.forEach((c) => {
+      cell(x, c.w || 20, c.h || heights, c.text, c);
+      x += c.w || 20;
+    });
+    y += heights;
+  }
+
+  function borderedBlock(x, w, lines, opts = {}) {
+    const lineH = opts.lineH || 5;
+    const headingH = lineH + 1; // slightly taller heading bar
+    const h = lines.length * lineH + 1;
+    // Grey background behind first line (heading) if it's bold
+    if (lines[0]?.bold) {
+      doc.setFillColor(233, 233, 233);
+      doc.rect(x, y, w, headingH, "F");
+    }
+    doc.setDrawColor(0);
+    doc.rect(x, y, w, h, "S");
+    lines.forEach((line, i) => {
+      setFont(opts.fontSize || 8, line.bold ? "bold" : "normal");
+      const ly = i === 0 ? y + headingH / 2 : y + headingH + (i - 1) * lineH + lineH / 2;
+      doc.text(
+        line.text,
+        x + 1.5,
+        ly + (opts.fontSize || 8) * 0.35,
+        { maxWidth: w - 3 }
+      );
+    });
+    y += h;
+  }
+
+  // ============== HEADER ==============
+  // Left: logo or company name
+  if (cleanLogo) {
+    try {
+      const format = getImageFormat(cleanLogo);
+      doc.addImage(cleanLogo, format, ml, y, logoWidth, logoHeight);
+    } catch (e) {
+      try {
+        doc.addImage(cleanLogo, ml, y, logoWidth, logoHeight);
+      } catch (e2) {
+        setFont(14, "bold");
+        doc.text(seller.name || "YOUR COMPANY", ml, y + 6);
+      }
+    }
+  } else {
+    setFont(14, "bold");
+    doc.text(seller.name || "YOUR COMPANY", ml, y + 6);
+  }
+
+  // Dynamic Title rendering
+  let titleX = pw - mr - 4;
+  if (titleAlign === "center") {
+    titleX = pw / 2;
+  } else if (titleAlign === "left") {
+    titleX = ml;
+  }
+  titleX += titleXOffset;
+  const titleY = y + 6 + titleYOffset;
+
+  setFont(titleFontSize, "bold");
+  doc.text(titleText || "INVOICE", titleX, titleY, { align: titleAlign });
+  
+  const logoH = cleanLogo ? logoHeight : 14;
+  y += Math.max(logoH, 14) + 8;
+
+  // ============== TOP SECTION: SELLER (left) + META (right) ==============
+  const topStartY = y;
+
+  // --- SELLER block (left) ---
+  const sellerLines = [
+    { text: "SELLER", bold: true },
+    { text: seller.name, bold: true },
+    { text: seller.addr1 },
+    { text: seller.addr2 },
+    { text: `TRN NO : ${seller.trn}` },
+    { text: `CONTACT PERSON ${seller.contactPerson}` },
+    { text: `CONTACT : ${seller.contact}` },
+    { text: `EMAIL ${seller.email}` },
+  ];
+  borderedBlock(ml, colLeft, sellerLines, { lineH: 4.0, fontSize: 7.5 });
+
+  const sellerBlockEnd = y;
+
+  // --- META block (right) ---
+  const metaData = [
+    [
+      { text: "INVOICE NO", bold: true, fill: true, fillColor: [233, 233, 233] },
+      { text: "DATE", bold: true, fill: true, fillColor: [233, 233, 233] },
+    ],
+    [
+      { text: meta.invoiceNo || "", align: "center" },
+      { text: fmtDate(meta.date), align: "center" },
+    ],
+    [
+      { text: "SUPPLIER PO", bold: true, fill: true, fillColor: [233, 233, 233] },
+      { text: "PO DATE", bold: true, fill: true, fillColor: [233, 233, 233] },
+    ],
+    [
+      { text: meta.supplierPo || "", align: "center" },
+      { text: fmtDate(meta.poDate), align: "center" },
+    ],
+    [
+      { text: "TRANSPORT TYPE", bold: true, fill: true, fillColor: [233, 233, 233] },
+      { text: "DRIVER /VESSEL NO", bold: true, fill: true, fillColor: [233, 233, 233] },
+    ],
+    [
+      { text: meta.transportType || "", align: "center" },
+      { text: meta.driverVessel || "", align: "center" },
+    ],
+    [
+      { text: "LOADING AT", bold: true, fill: true, fillColor: [233, 233, 233] },
+      { text: "FINAL DESTINATION", bold: true, fill: true, fillColor: [233, 233, 233] },
+    ],
+    [
+      { text: meta.loadingAt || "", align: "center" },
+      { text: meta.finalDestination || "", align: "center" },
+    ],
+  ];
+
+  y = topStartY;
+  const colW = colRight / 2;
+  metaData.forEach((rowData) => {
+    const hasSpan = rowData.some((c) => c.colSpan === 2);
+    const xStart = ml + colLeft;
+
+    // Calculate required height for text wrapping
+    let maxLines = 1;
+    rowData.forEach((c) => {
+      if (c.text && !c.bold) {
+        setFont(7.5, "normal");
+        const lines = doc.splitTextToSize(c.text, c.colSpan === 2 ? colRight - 2 : colW - 2);
+        maxLines = Math.max(maxLines, lines.length);
+      }
+    });
+    const h = Math.max(7, maxLines * 4 + 2);
+
+    if (hasSpan) {
+      const cell = rowData.find((c) => c.colSpan === 2);
+      if (cell.fill) {
+        doc.setFillColor(...cell.fillColor);
+        doc.rect(xStart, y, colRight, h, "F");
+      }
+      doc.setDrawColor(0);
+      doc.rect(xStart, y, colRight, h, "S");
+      setFont(7.5, cell.bold ? "bold" : "normal");
+      if (cell.text && !cell.bold) {
+        // Multi-line text - use splitTextToSize
+        const lines = doc.splitTextToSize(cell.text || "", colRight - 2);
+        lines.forEach((line, li) => {
+          const lx = cell.align === "center" ? xStart + colRight / 2 : xStart + 1;
+          doc.text(line, lx, y + 3 + li * 4 + 7.5 * 0.35, {
+            align: cell.align === "center" ? "center" : "left",
+          });
+        });
+      } else {
+        doc.text(cell.text || "", xStart + 1, y + h / 2 + 7.5 * 0.35, {
+          align: cell.align === "center" ? "center" : "left",
+          maxWidth: colRight - 2,
+        });
+      }
+    } else {
+      rowData.forEach((c, ci) => {
+        if (c.fill) {
+          doc.setFillColor(...c.fillColor);
+          doc.rect(xStart + ci * colW, y, colW, h, "F");
+        }
+        doc.setDrawColor(0);
+        doc.rect(xStart + ci * colW, y, colW, h, "S");
+        setFont(7.5, c.bold ? "bold" : "normal");
+        if (c.text && !c.bold) {
+          const lines = doc.splitTextToSize(c.text || "", colW - 2);
+          lines.forEach((line, li) => {
+            const lx = c.align === "center" ? xStart + ci * colW + colW / 2 : xStart + ci * colW + 1;
+            doc.text(line, lx, y + 3 + li * 4 + 7.5 * 0.35, {
+              align: c.align === "center" ? "center" : "left",
+            });
+          });
+        } else {
+          const tx = c.align === "center" ? xStart + ci * colW + colW / 2 : xStart + ci * colW + 1;
+          doc.text(c.text || "", tx, y + h / 2 + 7.5 * 0.35, {
+            align: c.align === "center" ? "center" : "left",
+            maxWidth: colW - 2,
+          });
+        }
+      });
+    }
+    y += h;
+  });
+  // Save where the meta/right column ends, then reset y to Seller's bottom
+  const metaBlockEnd = y;
+  y = sellerBlockEnd;
+
+  // ============== BUYER (left) + MISC (right) ==============
+  const buyerStartY = y;
+
+  // --- BUYER block (left) ---
+  const buyerLines = [
+    { text: "BUYER / CONSIGNEE", bold: true },
+    { text: buyer.name, bold: true },
+    { text: buyer.addr1 },
+    { text: buyer.addr2 },
+    { text: `GST ${buyer.gst}` },
+    { text: `PAN ${buyer.pan}` },
+    { text: `CONTACT ${buyer.contact}` },
+    { text: `EMAIL ${buyer.email}` },
+  ];
+  borderedBlock(ml, colLeft, buyerLines, { lineH: 4.0, fontSize: 7.5 });
+  const buyerBlockEnd = y;
+
+  // --- NOTIFY PARTY block (left, under Buyer) — simplified ---
+  const notifyLines = [
+    { text: "NOTIFY PARTY", bold: true },
+    { text: notifyParty.name || "—", bold: true },
+    { text: notifyParty.addr1 },
+    { text: notifyParty.addr2 },
+    { text: `EMAIL ${notifyParty.email}` },
+    { text: `CONTACT ${notifyParty.contact}` },
+  ];
+  borderedBlock(ml, colLeft, notifyLines, { lineH: 4.0, fontSize: 7.5 });
+  const notifyBlockEnd = y;
+
+  // --- MISC block (right, continues from where meta block ended) ---
+  y = metaBlockEnd;
+  const miscData = [
+    [
+      { text: "PACKING", colSpan: 2, bold: true, fill: true, fillColor: [233, 233, 233] },
+    ],
+    [
+      { text: meta.packing || "", colSpan: 2 },
+    ],
+    [
+      { text: "PAYMENT TERMS", colSpan: 2, bold: true, fill: true, fillColor: [233, 233, 233] },
+    ],
+    [
+      { text: meta.paymentTerms || "", colSpan: 2 },
+    ],
+    [
+      { text: "ORIGIN OF GOODS", colSpan: 2, bold: true, fill: true, fillColor: [233, 233, 233] },
+    ],
+    [
+      { text: meta.originOfGoods || "", colSpan: 2 },
+    ],
+  ];
+
+  miscData.forEach((rowData) => {
+    const cell = rowData[0];
+    const xStart = ml + colLeft;
+
+    // Calculate height for text wrapping
+    let reqH = 7;
+    if (cell.text && !cell.bold) {
+      setFont(7.5, "normal");
+      const lines = doc.splitTextToSize(cell.text || "", colRight - 2);
+      reqH = Math.max(7, lines.length * 4 + 2);
+    }
+    const h = reqH;
+
+    if (cell.fill) {
+      doc.setFillColor(...cell.fillColor);
+      doc.rect(xStart, y, colRight, h, "F");
+    }
+    doc.setDrawColor(0);
+    doc.rect(xStart, y, colRight, h, "S");
+    setFont(7.5, cell.bold ? "bold" : "normal");
+
+    if (cell.text && !cell.bold) {
+      const lines = doc.splitTextToSize(cell.text || "", colRight - 2);
+      lines.forEach((line, li) => {
+        const lx = cell.align === "center" ? xStart + colRight / 2 : xStart + 1;
+        doc.text(line, lx, y + 3 + li * 4 + 7.5 * 0.35, {
+          align: cell.align === "center" ? "center" : "left",
+        });
+      });
+    } else {
+      doc.text(cell.text || "", xStart + 1, y + h / 2 + 7.5 * 0.35, {
+        align: cell.align === "center" ? "center" : "left",
+        maxWidth: colRight - 2,
+      });
+    }
+    y += h;
+  });
+  y = Math.max(y, notifyBlockEnd) + 1;
+
+  // ============== LINE ITEMS TABLE ==============
+  const tableBody = items.map((it, i) => {
+    const amt = (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0);
+    return [
+      String(i + 1),
+      it.description,
+      it.qty,
+      it.rate,
+      it.per,
+      amt ? money(amt) : "",
+    ];
+  });
+
+  // Blank rows to fill table (5 lines total)
+  const blankRows = Math.max(0, 5 - items.length);
+  for (let i = 0; i < blankRows; i++) {
+    tableBody.push(["", "", "", "", "", ""]);
+  }
+
+  // Total row
+  tableBody.push([
+    {
+      content: "TOTAL",
+      styles: { fontStyle: "bold", halign: "center" },
+      colSpan: 2,
+    },
+    {
+      content: totalQty ? totalQty.toFixed(3) : "",
+      styles: { fontStyle: "bold", halign: "right" },
+    },
+    "",
+    {
+      content: meta.currency || "",
+      styles: { fontStyle: "bold", halign: "center" },
+    },
+    {
+      content: money(subtotal),
+      styles: { fontStyle: "bold", halign: "right" },
+    },
+  ]);
+
+  autoTable(doc, {
+    startY: y,
+    margin: { left: ml, right: mr },
+    tableWidth: usable,
+    head: [
+      [
+        { content: "SR.", styles: { halign: "center" } },
+        { content: "MATERIAL DESCRIPTION" },
+        { content: "QTY", styles: { halign: "center" } },
+        { content: "RATE", styles: { halign: "center" } },
+        { content: "PER", styles: { halign: "center" } },
+        { content: "AMOUNT", styles: { halign: "center" } },
+      ],
+    ],
+    body: tableBody,
+    headStyles: {
+      fillColor: [233, 233, 233],
+      textColor: [0, 0, 0],
+      fontStyle: "bold",
+      fontSize: 8,
+      halign: "center",
+      lineColor: [0, 0, 0],
+      lineWidth: 0.5,
+    },
+    bodyStyles: {
+      fontSize: 8,
+      lineColor: [0, 0, 0],
+      lineWidth: 0.5,
+    },
+    columnStyles: {
+      0: { cellWidth: 12, halign: "center" },
+      1: { cellWidth: "auto" },
+      2: { cellWidth: 22, halign: "right" },
+      3: { cellWidth: 22, halign: "right" },
+      4: { cellWidth: 16, halign: "center" },
+      5: { cellWidth: 28, halign: "right" },
+    },
+    didParseCell(data) {
+      // Highlight TOTAL row
+      if (
+        data.section === "body" &&
+        data.cell.text &&
+        data.cell.text[0] === "TOTAL"
+      ) {
+        data.cell.styles.fillColor = [233, 233, 233];
+        data.cell.styles.fontStyle = "bold";
+      }
+    },
+    theme: "grid",
+    tableLineColor: [0, 0, 0],
+    tableLineWidth: 0.5,
+  });
+
+  y = doc.lastAutoTable.finalY + 4;
+
+  // ============== AMOUNT IN WORDS + TOTALS ==============
+  const totalsStartY = y;
+
+  // --- AMOUNT IN WORDS (left, auto-filled from total) ---
+  const autoWords = meta.amountInWords || numToWords(totalInclVat) + " " + (meta.currency || "");
+  const wordsLinesArr = doc.splitTextToSize(autoWords, colLeft - 2);
+  const wordsH = Math.max(12, wordsLinesArr.length * 4 + 6);
+  doc.setDrawColor(0);
+  doc.rect(ml, y, colLeft, wordsH, "S");
+  setFont(7.5, "bold");
+  doc.text("AMOUNT IN WORDS", ml + 1, y + 2 + 7.5 * 0.35);
+  setFont(7.5, "normal");
+  wordsLinesArr.forEach((line, li) => {
+    doc.text(line, ml + 1, y + 7 + li * 4 + 7.5 * 0.35, { maxWidth: colLeft - 2 });
+  });
+
+  // --- TOTALS (right) ---
+  const totalsX = ml + colLeft;
+  const totalsData = [
+    [`VAT @ ${vatPercent}%`, vatAmount ? money(vatAmount) : "-"],
+    ["TOTAL INCL VAT", money(totalInclVat)],
+    [`ADVANCE ${advancePercent}%`, money(advanceAmt)],
+    ["BALANCE TO PAY", money(balance)],
+  ];
+
+  // Draw totals table manually
+  const totalsH = totalsData.length * 6 + 1;
+  doc.rect(totalsX, y, colRight, totalsH, "S");
+  totalsData.forEach((row, i) => {
+    const ry = y + i * 6;
+    const isLast = i === totalsData.length - 1;
+    setFont(isLast ? 6.5 : 7.5, isLast ? "bold" : "normal");
+
+    if (isLast) doc.setTextColor(26, 79, 160);
+    else doc.setTextColor(0, 0, 0);
+
+    doc.text(row[0], totalsX + 2, ry + 3 + 7.5 * 0.35, {
+      maxWidth: colRight / 2 - 2,
+    });
+    doc.text(row[1], totalsX + colRight - 2, ry + 3 + 7.5 * 0.35, {
+      align: "right",
+      maxWidth: colRight / 2 - 2,
+    });
+  });
+  doc.setTextColor(0, 0, 0);
+
+  y = Math.max(y + wordsH, y + totalsH) + 4;
+
+  // ============== BANK DETAILS + SIGNATURE ==============
+  // --- BANK DETAILS (left) ---
+  const bankLines = [
+    { text: "BANK DETAILS", bold: true },
+    { text: `ACC NAME : ${bank.accName}`, rich: true },
+    { text: `BANK NAME : ${bank.bankName}` },
+    { text: `ACC NO : ${bank.accNo}` },
+    { text: `IBAN NO : ${bank.iban}` },
+    { text: `SWIFT NO : ${bank.swift}` },
+    { text: `ADDRESS : ${bank.address}` },
+  ];
+  const bankH = bankLines.length * 5 + 2;
+  doc.setDrawColor(0);
+  doc.rect(ml, y, colLeft, bankH, "S");
+  bankLines.forEach((line, i) => {
+    setFont(7.5, line.bold ? "bold" : "normal");
+    doc.text(line.text, ml + 1.5, y + 2 + i * 5 + 7.5 * 0.35, {
+      maxWidth: colLeft - 3,
+    });
+  });
+
+  // --- SIGNATURE (right) ---
+  const sigX = ml + colLeft;
+  const sigH = bankH;
+  doc.setDrawColor(0);
+  doc.rect(sigX, y, colRight, sigH, "S");
+  setFont(7.5, "normal");
+  doc.text("FOR", sigX + colRight / 2, y + 5, { align: "center" });
+  setFont(7.5, "bold");
+  doc.text(seller.name, sigX + colRight / 2, y + 11, { align: "center" });
+
+  const imgY = y + 14;
+  if (cleanSignature && cleanStamp) {
+    // Both present: draw side-by-side
+    // Signature on the left, Stamp on the right
+    const leftCenterX = sigX + colRight / 4;
+    const rightCenterX = sigX + (3 * colRight) / 4;
+    
+    try {
+      const format = getImageFormat(cleanSignature);
+      doc.addImage(cleanSignature, format, leftCenterX - (sigWidth / 2), imgY, sigWidth, sigHeight);
+    } catch (e) {
+      try { doc.addImage(cleanSignature, leftCenterX - (sigWidth / 2), imgY, sigWidth, sigHeight); } catch (e2) {}
+    }
+    
+    try {
+      const format = getImageFormat(cleanStamp);
+      doc.addImage(cleanStamp, format, rightCenterX - (stampWidth / 2), imgY, stampWidth, stampHeight);
+    } catch (e) {
+      try { doc.addImage(cleanStamp, rightCenterX - (stampWidth / 2), imgY, stampWidth, stampHeight); } catch (e2) {}
+    }
+  } else if (cleanSignature) {
+    // Only Signature: centered
+    try {
+      const format = getImageFormat(cleanSignature);
+      doc.addImage(cleanSignature, format, sigX + colRight / 2 - (sigWidth / 2), imgY, sigWidth, sigHeight);
+    } catch (e) {
+      try { doc.addImage(cleanSignature, sigX + colRight / 2 - (sigWidth / 2), imgY, sigWidth, sigHeight); } catch (e2) {}
+    }
+  } else if (cleanStamp) {
+    // Only Stamp: centered
+    try {
+      const format = getImageFormat(cleanStamp);
+      doc.addImage(cleanStamp, format, sigX + colRight / 2 - (stampWidth / 2), imgY, stampWidth, stampHeight);
+    } catch (e) {
+      try { doc.addImage(cleanStamp, sigX + colRight / 2 - (stampWidth / 2), imgY, stampWidth, stampHeight); } catch (e2) {}
+    }
+  }
+  setFont(7, "normal");
+  doc.text("AUTH SIGNATORY", sigX + colRight / 2, y + sigH - 2, {
+    align: "center",
+  });
+
+  // Save
+  const filename = `invoice-${meta.invoiceNo || "easyInvoice"}.pdf`;
+  doc.save(filename);
+  return filename;
+}
