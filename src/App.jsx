@@ -409,6 +409,10 @@ export default function App() {
   const [activeOpts, setActiveOpts] = useState(null);
   const [toast, setToast] = useState("");
   const [editingIndex, setEditingIndex] = useState(null);
+  const [invoiceSearchQuery, setInvoiceSearchQuery] = useState("");
+  const [showInvoiceSearch, setShowInvoiceSearch] = useState(false);
+  const [packingSearchQuery, setPackingSearchQuery] = useState("");
+  const [showPackingSearch, setShowPackingSearch] = useState(false);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -1088,7 +1092,42 @@ export default function App() {
               </p>
             </div>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} />
+              {showInvoiceSearch && (
+                <input
+                  type="text"
+                  placeholder="Search invoices..."
+                  value={invoiceSearchQuery}
+                  onChange={(e) => setInvoiceSearchQuery(e.target.value)}
+                  style={{
+                    padding: "8px 12px",
+                    fontSize: 13,
+                    border: "1px solid #1c1c1c",
+                    borderRadius: 8,
+                    outline: "none",
+                    width: 200,
+                  }}
+                  autoFocus
+                />
+              )}
+              <button
+                onClick={() => {
+                  setShowInvoiceSearch(!showInvoiceSearch);
+                  if (showInvoiceSearch) setInvoiceSearchQuery("");
+                }}
+                style={{
+                  padding: "8px 10px",
+                  fontSize: 14,
+                  border: "1px solid #1c1c1c",
+                  borderRadius: 8,
+                  background: showInvoiceSearch ? "#1c1c1c" : "#fff",
+                  color: showInvoiceSearch ? "#fff" : "#1c1c1c",
+                  cursor: "pointer",
+                }}
+                title="Search Invoices"
+              >
+                🔍
+              </button>
+              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} />
               <button
                 onClick={() => { setShowHistory(false); setIsPackingMode(false); setEditingIndex(null); }}
                 style={{
@@ -1139,7 +1178,22 @@ export default function App() {
                     <div style={{ textAlign: "right" }}>Value</div>
                     <div style={{ textAlign: "right" }}>Actions</div>
                   </div>
-                  {history.map((inv, i) => {
+                  {history
+                    .filter((inv) => {
+                      if (!invoiceSearchQuery) return true;
+                      const q = invoiceSearchQuery.toLowerCase();
+                      const dateStr = inv.savedAt ? new Date(inv.savedAt).toLocaleDateString() : "";
+                      const itemsStr = inv.items?.map(it => it.description || "").join(" ").toLowerCase() || "";
+                      return (
+                        inv.meta?.invoiceNo?.toLowerCase().includes(q) ||
+                        inv.meta?.refNo?.toLowerCase().includes(q) ||
+                        inv.buyer?.name?.toLowerCase().includes(q) ||
+                        inv.meta?.transportType?.toLowerCase().includes(q) ||
+                        dateStr.includes(q) ||
+                        itemsStr.includes(q)
+                      );
+                    })
+                    .map((inv, i) => {
                     const totalQ = inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0) || 0;
                     const totalV = inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0) || 0;
                     return (
@@ -1203,7 +1257,42 @@ export default function App() {
               </p>
             </div>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} />
+              {showPackingSearch && (
+                <input
+                  type="text"
+                  placeholder="Search packing lists..."
+                  value={packingSearchQuery}
+                  onChange={(e) => setPackingSearchQuery(e.target.value)}
+                  style={{
+                    padding: "8px 12px",
+                    fontSize: 13,
+                    border: "1px solid #1c1c1c",
+                    borderRadius: 8,
+                    outline: "none",
+                    width: 200,
+                  }}
+                  autoFocus
+                />
+              )}
+              <button
+                onClick={() => {
+                  setShowPackingSearch(!showPackingSearch);
+                  if (showPackingSearch) setPackingSearchQuery("");
+                }}
+                style={{
+                  padding: "8px 10px",
+                  fontSize: 14,
+                  border: "1px solid #1c1c1c",
+                  borderRadius: 8,
+                  background: showPackingSearch ? "#1c1c1c" : "#fff",
+                  color: showPackingSearch ? "#fff" : "#1c1c1c",
+                  cursor: "pointer",
+                }}
+                title="Search Packing Lists"
+              >
+                🔍
+              </button>
+              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} />
               <button
                 onClick={() => {
                   setShowPackingHistory(false);
@@ -1258,7 +1347,22 @@ export default function App() {
                     <div style={{ textAlign: "right" }}>Total Net Wt (MTS)</div>
                     <div style={{ textAlign: "right" }}>Actions</div>
                   </div>
-                  {packingHistory.map((pack, i) => {
+                  {packingHistory
+                    .filter((pack) => {
+                      if (!packingSearchQuery) return true;
+                      const q = packingSearchQuery.toLowerCase();
+                      const dateStr = pack.savedAt ? new Date(pack.savedAt).toLocaleDateString() : "";
+                      const goodsStr = pack.packingItems?.map(it => it.descriptionOfGoods || "").join(" ").toLowerCase() || "";
+                      return (
+                        pack.meta?.invoiceNo?.toLowerCase().includes(q) ||
+                        pack.meta?.refNo?.toLowerCase().includes(q) ||
+                        pack.buyer?.name?.toLowerCase().includes(q) ||
+                        pack.meta?.transportType?.toLowerCase().includes(q) ||
+                        dateStr.includes(q) ||
+                        goodsStr.includes(q)
+                      );
+                    })
+                    .map((pack, i) => {
                     const totalNet = pack.packingItems?.reduce((s, it) => s + (parseFloat(it.netWeight) || 0), 0) || 0;
                     return (
                       <div key={i} style={{ display: "grid", gridTemplateColumns: "100px 90px 1.2fr 1fr 1.5fr 110px 150px", gap: 10, padding: "14px 8px", borderBottom: "1px solid #eee", fontSize: 13, alignItems: "center" }}>
@@ -1365,7 +1469,7 @@ export default function App() {
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} />
+              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} />
               <button
                 onClick={() => {
                   if (isPackingMode) {
