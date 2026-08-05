@@ -828,6 +828,50 @@ export async function generatePackingListPdf(packingData) {
     doc.setFontSize(size);
   };
 
+  function borderedBlock(x, w, lines, opts = {}) {
+    const fontSize = opts.fontSize || 8;
+    const lineH = opts.lineH || 5;
+    const headingH = lineH + 1;
+    
+    const processedLines = [];
+    lines.forEach((line, i) => {
+      setFont(fontSize, line.bold ? "bold" : "normal");
+      const textStr = (line.text || "").trim();
+      if (i === 0) {
+        processedLines.push({ text: textStr, bold: line.bold });
+      } else {
+        const wrapped = doc.splitTextToSize(textStr, w - 3);
+        if (wrapped.length > 0) {
+          wrapped.forEach((wl) => {
+            processedLines.push({ text: wl, bold: line.bold });
+          });
+        } else {
+          processedLines.push({ text: "", bold: line.bold });
+        }
+      }
+    });
+
+    const h = processedLines.length * lineH + 1;
+    if (processedLines[0]?.bold) {
+      doc.setFillColor(233, 233, 233);
+      doc.rect(x, y, w, headingH, "F");
+    }
+    doc.setDrawColor(0);
+    doc.rect(x, y, w, h, "S");
+    
+    processedLines.forEach((line, i) => {
+      setFont(fontSize, line.bold ? "bold" : "normal");
+      const ly = i === 0 ? y + headingH / 2 : y + headingH + (i - 1) * lineH + lineH / 2;
+      doc.text(
+        line.text,
+        x + 1.5,
+        ly + fontSize * 0.17,
+        { maxWidth: w - 3 }
+      );
+    });
+    y += h;
+  }
+
   // --- HEADER SECTION (Logo + Title) ---
   if (cleanLogo) {
     try {
