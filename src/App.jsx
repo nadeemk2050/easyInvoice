@@ -295,6 +295,8 @@ export default function App() {
     contact: "",
   });
 
+  const [containers, setContainers] = useState([]);
+
   const [meta, setMeta] = useState({
     invoiceNo: "EX/AS/0098/26",
     date: "2026-06-02",
@@ -438,6 +440,7 @@ export default function App() {
         seller,
         buyer,
         notifyParty,
+        containers,
         meta: {
           ...meta,
           amountInWords: meta.amountInWords || autoWords,
@@ -484,6 +487,7 @@ export default function App() {
     setSeller(data.seller || seller);
     setBuyer(data.buyer || buyer);
     setNotifyParty(data.notifyParty || notifyParty || {});
+    setContainers(data.containers || []);
     setMeta(data.meta || meta);
     setBank(data.bank || bank);
     setVatPercent(data.vatPercent ?? vatPercent);
@@ -587,6 +591,13 @@ export default function App() {
         if (savedTitleX) setTitleXOffset(parseFloat(savedTitleX));
         const savedTitleY = localStorage.getItem(_uid + "_easyinvoice_titleYOffset");
         if (savedTitleY) setTitleYOffset(parseFloat(savedTitleY));
+
+        const savedContainers = localStorage.getItem(_uid + "_easyinvoice_containers");
+        if (savedContainers) {
+          try {
+            setContainers(JSON.parse(savedContainers));
+          } catch {}
+        }
 
         const savedBanks = localStorage.getItem(_uid + "_easyinvoice_banks");
         if (savedBanks) {
@@ -701,6 +712,10 @@ export default function App() {
           setHistory(data.easyinvoice_history);
         }
 
+        if (Array.isArray(data.easyinvoice_containers)) {
+          setContainers(data.easyinvoice_containers);
+        }
+
         if (data.easyinvoice_company) {
           const comp = data.easyinvoice_company;
           setSeller({
@@ -757,6 +772,45 @@ export default function App() {
 
   // Set UID for scoped localStorage
   _uid = user?.uid || "";
+
+  const enteredContainers = containers.filter(c => (c.containerNo && c.containerNo.trim()) || (c.sealNo && c.sealNo.trim()));
+  const hasContainers = enteredContainers.length > 0;
+  const hasNotify = Object.values(notifyParty).some((v) => v && v.trim());
+
+  const renderMarksAndNo = () => {
+    if (!hasContainers) return null;
+    return (
+      <>
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            fontStyle: "italic",
+            marginBottom: 2,
+            marginTop: 6,
+            background: "#e9e9e9",
+            padding: "3px 6px",
+            borderRadius: 2,
+          }}
+        >
+          MARKS & NO.
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse", borderRadius: 3 }}>
+          <tbody>
+            {enteredContainers.map((c, idx) => (
+              <tr key={idx}>
+                <td style={td()}>
+                  {c.containerNo && `CONT NO: ${c.containerNo}`}
+                  {c.containerNo && c.sealNo && ", "}
+                  {c.sealNo && `SEAL NO: ${c.sealNo}`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </>
+    );
+  };
 
   // ---------- Datalists from saved management data ----------
   const dlCurrencies = loadList("easyinvoice_currencies");
@@ -1507,6 +1561,52 @@ export default function App() {
             )}
           </Section>
 
+          <Section title="Marks and Numbers">
+            {containers.map((c, i) => (
+              <div key={i} style={{ border: "1px solid #e8e8e8", borderRadius: 6, padding: 8, marginBottom: 8 }}>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <div style={{ flex: 1 }}>
+                    {field(`Container No (${i + 1})`, c.containerNo || "", (v) => {
+                      const next = [...containers];
+                      next[i] = { ...next[i], containerNo: v };
+                      setContainers(next);
+                      localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify(next));
+                    }, "e.g. MRSU9998798", true)}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    {field(`Seal No (${i + 1})`, c.sealNo || "", (v) => {
+                      const next = [...containers];
+                      next[i] = { ...next[i], sealNo: v };
+                      setContainers(next);
+                      localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify(next));
+                    }, "e.g. ML-AE88786688", true)}
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    const next = containers.filter((_, idx) => idx !== i);
+                    setContainers(next);
+                    localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify(next));
+                  }}
+                  style={{ fontSize: 11, color: "#b3261e", background: "none", border: "none", padding: 0, marginTop: 2 }}
+                >
+                  Remove Container
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => {
+                const next = [...containers, { containerNo: "", sealNo: "" }];
+                setContainers(next);
+                localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify(next));
+              }}
+              style={{ width: "100%", padding: "8px", fontSize: 12, border: "1px dashed #999", borderRadius: 6, background: "#fafafa" }}
+            >
+              + Add More Containers
+            </button>
+          </Section>
+
+
           <Section title="Items Details">
             {items.map((it, i) => (
               <div
@@ -1632,7 +1732,7 @@ export default function App() {
 
           <button
             onClick={() => {
-              const data = { seller, buyer, notifyParty, meta, bank, items, vatPercent: parseFloat(vatPercent) || 0, advancePercent: parseFloat(advancePercent) || 0, logo, signature, stamp };
+              const data = { seller, buyer, notifyParty, containers, meta, bank, items, vatPercent: parseFloat(vatPercent) || 0, advancePercent: parseFloat(advancePercent) || 0, logo, signature, stamp };
               const saved = saveToHistory(data);
               setHistory(loadHistory());
               showToast(saved ? "Invoice saved!" : "Duplicate invoice no — not saved");
@@ -2011,6 +2111,7 @@ export default function App() {
                       )}
                     </tbody>
                   </table>
+                  {!hasNotify && renderMarksAndNo()}
                   {/* Notify Party under Buyer — hidden when empty */}
                   {Object.values(notifyParty).some((v) => v && v.trim()) && (
                     <>
@@ -2057,6 +2158,7 @@ export default function App() {
                       )}
                     </tbody>
                   </table>
+                  {hasNotify && renderMarksAndNo()}
                     </>
                   )}
                 </td>

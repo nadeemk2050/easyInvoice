@@ -96,6 +96,7 @@ export async function generateInvoicePdf(invoiceData) {
     seller,
     buyer,
     notifyParty = { name: "", addr1: "", addr2: "", email: "", contact: "" },
+    containers = [],
     meta,
     bank,
     items,
@@ -435,10 +436,7 @@ export async function generateInvoicePdf(invoiceData) {
   if (buyer.contact) buyerLines.push({ text: `CONTACT : ${buyer.contact}` });
   if (buyer.email) buyerLines.push({ text: `EMAIL : ${buyer.email}` });
   
-  borderedBlock(ml, colLeft, buyerLines, { lineH: 4.0, fontSize: 7.5 });
-  const buyerBlockEnd = y;
-
-  // --- NOTIFY PARTY block (left, under Buyer) — simplified ---
+  // --- NOTIFY PARTY block construction ---
   const notifyLines = [
     { text: "NOTIFY PARTY", bold: true },
   ];
@@ -450,8 +448,31 @@ export async function generateInvoicePdf(invoiceData) {
   if (notifyParty.email) notifyLines.push({ text: `EMAIL : ${notifyParty.email}` });
   if (notifyParty.contact) notifyLines.push({ text: `CONTACT : ${notifyParty.contact}` });
 
-  if (notifyLines.length > 1) {
+  const hasNotify = notifyLines.length > 1;
+
+  const enteredContainers = (containers || []).filter(c => (c.containerNo && c.containerNo.trim()) || (c.sealNo && c.sealNo.trim()));
+  const hasContainers = enteredContainers.length > 0;
+  const containerLines = [
+    { text: "MARKS & NO.", bold: true }
+  ];
+  enteredContainers.forEach((c) => {
+    let parts = [];
+    if (c.containerNo) parts.push(`CONT NO: ${c.containerNo}`);
+    if (c.sealNo) parts.push(`SEAL NO: ${c.sealNo}`);
+    containerLines.push({ text: parts.join(", ") });
+  });
+
+  borderedBlock(ml, colLeft, buyerLines, { lineH: 4.0, fontSize: 7.5 });
+  if (!hasNotify && hasContainers) {
+    borderedBlock(ml, colLeft, containerLines, { lineH: 4.0, fontSize: 7.5 });
+  }
+  const buyerBlockEnd = y;
+
+  if (hasNotify) {
     borderedBlock(ml, colLeft, notifyLines, { lineH: 4.0, fontSize: 7.5 });
+    if (hasContainers) {
+      borderedBlock(ml, colLeft, containerLines, { lineH: 4.0, fontSize: 7.5 });
+    }
   }
   const notifyBlockEnd = y;
 
