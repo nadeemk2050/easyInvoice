@@ -63,7 +63,7 @@ function loadHistory() {
 
 function saveToHistory(invoice) {
   const list = loadHistory();
-  const dup = list.find((inv) => inv.meta?.invoiceNo === invoice.meta?.invoiceNo);
+  const dup = list.find((inv) => inv.meta?.invoiceNo === invoice.meta?.invoiceNo || (invoice.meta?.refNo && inv.meta?.refNo === invoice.meta?.refNo));
   if (dup) return false;
 
   // Strip large base64 image data to prevent QuotaExceededError in localStorage
@@ -88,7 +88,7 @@ function loadPackingHistory() {
 
 function saveToPackingHistory(packList) {
   const list = loadPackingHistory();
-  const dup = list.find((item) => item.meta?.invoiceNo === packList.meta?.invoiceNo);
+  const dup = list.find((item) => item.meta?.invoiceNo === packList.meta?.invoiceNo || (packList.meta?.refNo && item.meta?.refNo === packList.meta?.refNo));
   if (dup) return false;
 
   const { logo: _logo, signature: _signature, stamp: _stamp, ...cleanPackList } = packList;
@@ -407,6 +407,7 @@ export default function App() {
   const [packingHistory, setPackingHistory] = useState([]);
   const [activeOpts, setActiveOpts] = useState(null);
   const [toast, setToast] = useState("");
+  const [editingIndex, setEditingIndex] = useState(null);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -590,6 +591,50 @@ export default function App() {
       setPdfError("PDF generation failed.");
     }
     setPdfBusy(false);
+  };
+
+  const handleUpdatePackingList = () => {
+    if (editingIndex === null) return;
+    const list = loadPackingHistory();
+    const data = {
+      seller,
+      buyer,
+      notifyParty,
+      meta,
+      packingItems,
+      logo,
+      signature,
+      stamp,
+      savedAt: new Date().toISOString()
+    };
+    list[editingIndex] = data;
+    localStorage.setItem(_key("easyinvoice_packinghistory"), JSON.stringify(list));
+    setPackingHistory(list);
+    showToast("Packing List updated!");
+  };
+
+  const handleUpdateInvoice = () => {
+    if (editingIndex === null) return;
+    const list = loadHistory();
+    const data = {
+      seller,
+      buyer,
+      notifyParty,
+      containers,
+      meta,
+      bank,
+      items,
+      vatPercent: parseFloat(vatPercent) || 0,
+      advancePercent: parseFloat(advancePercent) || 0,
+      logo,
+      signature,
+      stamp,
+      savedAt: new Date().toISOString()
+    };
+    list[editingIndex] = data;
+    localStorage.setItem(_key("easyinvoice_history"), JSON.stringify(list));
+    setHistory(list);
+    showToast("Invoice updated!");
   };
 
   // ---------- Load from history ----------
@@ -1044,7 +1089,7 @@ export default function App() {
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} />
               <button
-                onClick={() => { setShowHistory(false); setIsPackingMode(false); }}
+                onClick={() => { setShowHistory(false); setIsPackingMode(false); setEditingIndex(null); }}
                 style={{
                   padding: "10px 20px",
                   fontSize: 13,
@@ -1083,10 +1128,12 @@ export default function App() {
               <div style={{ overflowX: "auto" }}>
                 <div style={{ minWidth: 800 }}>
                   {/* Column headers */}
-                  <div style={{ display: "grid", gridTemplateColumns: "120px 120px 1.5fr 100px 120px 200px", gap: 10, padding: "12px 8px", borderBottom: "2px solid #1c1c1c", fontSize: 12, fontWeight: 700, color: "#555" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "100px 90px 1.2fr 1fr 1.5fr 80px 100px 150px", gap: 10, padding: "12px 8px", borderBottom: "2px solid #1c1c1c", fontSize: 12, fontWeight: 700, color: "#555" }}>
                     <div>Date</div>
                     <div>Transport</div>
                     <div>Invoice No</div>
+                    <div>Ref No</div>
+                    <div>Buyer Name</div>
                     <div style={{ textAlign: "right" }}>Qty</div>
                     <div style={{ textAlign: "right" }}>Value</div>
                     <div style={{ textAlign: "right" }}>Actions</div>
@@ -1095,14 +1142,16 @@ export default function App() {
                     const totalQ = inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0) || 0;
                     const totalV = inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0) || 0;
                     return (
-                      <div key={i} style={{ display: "grid", gridTemplateColumns: "120px 120px 1.5fr 100px 120px 200px", gap: 10, padding: "14px 8px", borderBottom: "1px solid #eee", fontSize: 13, alignItems: "center" }}>
+                      <div key={i} style={{ display: "grid", gridTemplateColumns: "100px 90px 1.2fr 1fr 1.5fr 80px 100px 150px", gap: 10, padding: "14px 8px", borderBottom: "1px solid #eee", fontSize: 13, alignItems: "center" }}>
                         <div style={{ color: "#666" }}>{inv.savedAt ? new Date(inv.savedAt).toLocaleDateString() : ""}</div>
                         <div style={{ color: "#666" }}>{inv.meta?.transportType || "—"}</div>
                         <div style={{ fontWeight: 700, color: "#1c1c1c" }}>{inv.meta?.invoiceNo || "—"}</div>
+                        <div style={{ color: "#444" }}>{inv.meta?.refNo || "—"}</div>
+                        <div style={{ color: "#444", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={inv.buyer?.name}>{inv.buyer?.name || "—"}</div>
                         <div style={{ textAlign: "right", color: "#444" }}>{totalQ ? totalQ.toFixed(2) : "0.00"}</div>
                         <div style={{ textAlign: "right", fontWeight: 600 }}>{totalV ? totalV.toLocaleString("en-US", { minimumFractionDigits: 2 }) : "0.00"}</div>
                         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                          <button onClick={() => { loadInvoice(inv); setIsPackingMode(false); }}
+                          <button onClick={() => { loadInvoice(inv); setIsPackingMode(false); setEditingIndex(i); }}
                             style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }} title="Edit Invoice">✏️ Edit</button>
                           <button onClick={() => downloadFromHistory(inv)}
                             style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }} title="Download PDF">⬇️ PDF</button>
@@ -1199,20 +1248,24 @@ export default function App() {
               <div style={{ overflowX: "auto" }}>
                 <div style={{ minWidth: 800 }}>
                   {/* Column headers */}
-                  <div style={{ display: "grid", gridTemplateColumns: "120px 120px 1.5fr 150px 200px", gap: 10, padding: "12px 8px", borderBottom: "2px solid #1c1c1c", fontSize: 12, fontWeight: 700, color: "#555" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "100px 90px 1.2fr 1fr 1.5fr 110px 150px", gap: 10, padding: "12px 8px", borderBottom: "2px solid #1c1c1c", fontSize: 12, fontWeight: 700, color: "#555" }}>
                     <div>Date</div>
                     <div>Transport</div>
-                    <div>Invoice No / Packing Ref</div>
+                    <div>Packing Ref No</div>
+                    <div>Ref No</div>
+                    <div>Buyer Name</div>
                     <div style={{ textAlign: "right" }}>Total Net Wt (MTS)</div>
                     <div style={{ textAlign: "right" }}>Actions</div>
                   </div>
                   {packingHistory.map((pack, i) => {
                     const totalNet = pack.packingItems?.reduce((s, it) => s + (parseFloat(it.netWeight) || 0), 0) || 0;
                     return (
-                      <div key={i} style={{ display: "grid", gridTemplateColumns: "120px 120px 1.5fr 150px 200px", gap: 10, padding: "14px 8px", borderBottom: "1px solid #eee", fontSize: 13, alignItems: "center" }}>
+                      <div key={i} style={{ display: "grid", gridTemplateColumns: "100px 90px 1.2fr 1fr 1.5fr 110px 150px", gap: 10, padding: "14px 8px", borderBottom: "1px solid #eee", fontSize: 13, alignItems: "center" }}>
                         <div style={{ color: "#666" }}>{pack.savedAt ? new Date(pack.savedAt).toLocaleDateString() : ""}</div>
                         <div style={{ color: "#666" }}>{pack.meta?.transportType || "—"}</div>
                         <div style={{ fontWeight: 700, color: "#1c1c1c" }}>{pack.meta?.invoiceNo || "—"}</div>
+                        <div style={{ color: "#444" }}>{pack.meta?.refNo || "—"}</div>
+                        <div style={{ color: "#444", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={pack.buyer?.name}>{pack.buyer?.name || "—"}</div>
                         <div style={{ textAlign: "right", fontWeight: 600 }}>{totalNet ? totalNet.toFixed(3) : "0.000"}</div>
                         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                           <button onClick={() => {
@@ -1227,6 +1280,7 @@ export default function App() {
                             if (pack.stamp) setStamp(pack.stamp);
                             setShowPackingHistory(false);
                             setIsPackingMode(true);
+                            setEditingIndex(i);
                             showToast("Packing list loaded!");
                           }}
                             style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }}>✏️ Edit</button>
@@ -1727,8 +1781,11 @@ export default function App() {
           })()}
 
           <Section title="Invoice details">
-            {field("Invoice No", meta.invoiceNo, (v) =>
+            {field(isPackingMode ? "Packing Ref No" : "Invoice No", meta.invoiceNo, (v) =>
               setMeta({ ...meta, invoiceNo: v })
+            )}
+            {field("Ref Number", meta.refNo || "", (v) =>
+              setMeta({ ...meta, refNo: v })
             )}
             {dateField("Date", meta.date, (v) =>
               setMeta({ ...meta, date: v })
@@ -2058,16 +2115,38 @@ export default function App() {
             </Section>
           )}
 
-          <button
-            onClick={isPackingMode ? handleSavePackingList : () => {
-              const data = { seller, buyer, notifyParty, containers, meta, bank, items, vatPercent: parseFloat(vatPercent) || 0, advancePercent: parseFloat(advancePercent) || 0, logo, signature, stamp };
-              const saved = saveToHistory(data);
-              setHistory(loadHistory());
-              showToast(saved ? "Invoice saved!" : "Duplicate invoice no — not saved");
-            }}
-            style={{ width: "100%", padding: "10px", fontSize: 12, fontWeight: 600, color: "#1c1c1c", background: "#fff", border: "1px solid #1c1c1c", borderRadius: 7, marginTop: 4, cursor: "pointer" }}>
-            💾 Save {isPackingMode ? "Packing List" : "Invoice"}
-          </button>
+          {editingIndex !== null ? (
+            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+              <button
+                onClick={isPackingMode ? handleUpdatePackingList : handleUpdateInvoice}
+                style={{ flex: 1, padding: "10px", fontSize: 12, fontWeight: 700, color: "#fff", background: "#1a4fa0", border: "none", borderRadius: 7, cursor: "pointer" }}
+              >
+                🔄 Update {isPackingMode ? "Packing" : "Invoice"}
+              </button>
+              <button
+                onClick={isPackingMode ? handleSavePackingList : () => {
+                  const data = { seller, buyer, notifyParty, containers, meta, bank, items, vatPercent: parseFloat(vatPercent) || 0, advancePercent: parseFloat(advancePercent) || 0, logo, signature, stamp };
+                  const saved = saveToHistory(data);
+                  setHistory(loadHistory());
+                  showToast(saved ? "Saved as new Invoice!" : "Duplicate invoice/ref no — not saved");
+                }}
+                style={{ flex: 1, padding: "10px", fontSize: 12, fontWeight: 600, color: "#1c1c1c", background: "#fff", border: "1px solid #1c1c1c", borderRadius: 7, cursor: "pointer" }}
+              >
+                💾 Save As New
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={isPackingMode ? handleSavePackingList : () => {
+                const data = { seller, buyer, notifyParty, containers, meta, bank, items, vatPercent: parseFloat(vatPercent) || 0, advancePercent: parseFloat(advancePercent) || 0, logo, signature, stamp };
+                const saved = saveToHistory(data);
+                setHistory(loadHistory());
+                showToast(saved ? "Invoice saved!" : "Duplicate invoice/ref no — not saved");
+              }}
+              style={{ width: "100%", padding: "10px", fontSize: 12, fontWeight: 600, color: "#1c1c1c", background: "#fff", border: "1px solid #1c1c1c", borderRadius: 7, marginTop: 4, cursor: "pointer" }}>
+              💾 Save {isPackingMode ? "Packing List" : "Invoice"}
+            </button>
+          )}
           <button
             onClick={isPackingMode ? handleDownloadPackingList : downloadPDF}
             disabled={pdfBusy}
