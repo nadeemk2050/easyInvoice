@@ -600,6 +600,8 @@ export default function App() {
     setContainers(data.containers || []);
     setMeta(data.meta || meta);
     setBank(data.bank || bank);
+    setTitleText(data.titleText || "COMMERCIAL INVOICE");
+    setIsPackingMode(false);
     setVatPercent(data.vatPercent ?? vatPercent);
     setAdvancePercent(data.advancePercent ?? advancePercent);
     setItems(data.items || items);
@@ -1156,6 +1158,7 @@ export default function App() {
                 onClick={() => {
                   setShowPackingHistory(false);
                   setIsPackingMode(true);
+                  setTitleText("PACKING LIST");
                   // Reset forms to empty packing list
                   setPackingItems([{ containerSeal: "", typeOfPacking: "", descriptionOfGoods: "", grossWeight: "", tareWeight: "", netWeight: "" }]);
                 }}
@@ -1218,6 +1221,7 @@ export default function App() {
                             setNotifyParty(pack.notifyParty || notifyParty || {});
                             setMeta(pack.meta || meta);
                             setPackingItems(pack.packingItems || packingItems);
+                            setTitleText(pack.titleText || "PACKING LIST");
                             if (pack.logo) setLogo(pack.logo);
                             if (pack.signature) setSignature(pack.signature);
                             if (pack.stamp) setStamp(pack.stamp);
@@ -2182,7 +2186,7 @@ export default function App() {
                 pointerEvents: "none",
               }}
             >
-              {titleText || "INVOICE"}
+              {isPackingMode ? "PACKING LIST" : (titleText || "INVOICE")}
             </div>
           </div>
 

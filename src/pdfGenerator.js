@@ -869,97 +869,234 @@ export async function generatePackingListPdf(packingData) {
     return boxH;
   };
 
-  // --- SELLER (Left) vs META (Right) ---
+  // ============== TOP SECTION: SELLER (left) + META (right) ==============
+  const topStartY = y;
+
+  // --- SELLER block (left) ---
   const sellerLines = [
-    seller.name,
-    seller.addr1,
-    seller.addr2,
-    seller.trn ? `TRN NO : ${seller.trn}` : "",
-    seller.contact ? `CONTACT : ${seller.contact}` : "",
-    seller.email ? `EMAIL : ${seller.email}` : "",
-  ].filter(Boolean);
-
-  // Draw Seller block
-  const sellerH = drawTextBox(ml, y, colLeft, "SELLER", sellerLines);
-
-  // Draw Meta Table
-  const metaTableStartY = y;
-  doc.rect(ml + colLeft, metaTableStartY, colRight, sellerH, "S");
+    { text: "SELLER", bold: true },
+  ];
+  if (seller.name) sellerLines.push({ text: seller.name, bold: true });
+  if (seller.addr1) sellerLines.push({ text: seller.addr1 });
+  if (seller.addr2) sellerLines.push({ text: seller.addr2 });
+  if (seller.trn) sellerLines.push({ text: `TRN NO : ${seller.trn}` });
+  if (seller.contact) sellerLines.push({ text: `CONTACT : ${seller.contact}` });
+  if (seller.email) sellerLines.push({ text: `EMAIL : ${seller.email}` });
   
-  // Custom cell height calculations to split meta cells
-  const rows = [
-    [{ text: "INVOICE / REF NO", bold: true }, { text: "DATE", bold: true }],
-    [{ text: meta.invoiceNo || "" }, { text: fmtDate(meta.date) || "" }],
-    [{ text: "SUPPLIER PO", bold: true }, { text: "PO DATE", bold: true }],
-    [{ text: meta.supplierPo || "" }, { text: fmtDate(meta.poDate) || "" }],
-    [{ text: "TRANSPORT TYPE", bold: true }, { text: "DRIVER /VESSEL NO", bold: true }],
-    [{ text: meta.transportType || "" }, { text: meta.driverVessel || "" }],
-    [{ text: "LOADING AT", bold: true }, { text: "FINAL DESTINATION", bold: true }],
-    [{ text: meta.loadingAt || "" }, { text: meta.finalDestination || "" }],
+  borderedBlock(ml, colLeft, sellerLines, { lineH: 4.0, fontSize: 7.5 });
+
+  const sellerBlockEnd = y;
+
+  // --- META block (right) ---
+  const metaData = [
+    [
+      { text: "INVOICE / REF NO", bold: true, fill: true, fillColor: [233, 233, 233] },
+      { text: "DATE", bold: true, fill: true, fillColor: [233, 233, 233] },
+    ],
+    [
+      { text: meta.invoiceNo || "", align: "center" },
+      { text: fmtDate(meta.date), align: "center" },
+    ],
+    [
+      { text: "SUPPLIER PO", bold: true, fill: true, fillColor: [233, 233, 233] },
+      { text: "PO DATE", bold: true, fill: true, fillColor: [233, 233, 233] },
+    ],
+    [
+      { text: meta.supplierPo || "", align: "center" },
+      { text: fmtDate(meta.poDate), align: "center" },
+    ],
+    [
+      { text: "TRANSPORT TYPE", bold: true, fill: true, fillColor: [233, 233, 233] },
+      { text: "DRIVER /VESSEL NO", bold: true, fill: true, fillColor: [233, 233, 233] },
+    ],
+    [
+      { text: meta.transportType || "", align: "center" },
+      { text: meta.driverVessel || "", align: "center" },
+    ],
+    [
+      { text: "LOADING AT", bold: true, fill: true, fillColor: [233, 233, 233] },
+      { text: "FINAL DESTINATION", bold: true, fill: true, fillColor: [233, 233, 233] },
+    ],
+    [
+      { text: meta.loadingAt || "", align: "center" },
+      { text: meta.finalDestination || "", align: "center" },
+    ],
   ];
 
-  let metaY = metaTableStartY;
-  const rowH = sellerH / 8; // split seller box height into equal 8 rows
-  rows.forEach((row, rowIndex) => {
-    const isHeading = rowIndex % 2 === 0;
-    if (isHeading) {
-      doc.setFillColor(233, 233, 233);
-      doc.rect(ml + colLeft, metaY, colRight, rowH, "F");
-    }
-    // Draw cells
-    doc.rect(ml + colLeft, metaY, colRight / 2, rowH, "S");
-    doc.rect(ml + colLeft + colRight / 2, metaY, colRight / 2, rowH, "S");
+  y = topStartY;
+  const colW = colRight / 2;
+  metaData.forEach((rowData) => {
+    const hasSpan = rowData.some((c) => c.colSpan === 2);
+    const xStart = ml + colLeft;
 
-    setFont(7.0, isHeading ? "bold" : "normal");
-    doc.text(row[0].text, ml + colLeft + 1.5, metaY + rowH / 2 + 7.0 * 0.35, { maxWidth: colRight / 2 - 3 });
-    doc.text(row[1].text, ml + colLeft + colRight / 2 + 1.5, metaY + rowH / 2 + 7.0 * 0.35, { maxWidth: colRight / 2 - 3 });
-    metaY += rowH;
+    // Calculate required height for text wrapping
+    let maxLines = 1;
+    rowData.forEach((c) => {
+      if (c.text && !c.bold) {
+        setFont(7.5, "normal");
+        const lines = doc.splitTextToSize(c.text, c.colSpan === 2 ? colRight - 2 : colW - 2);
+        maxLines = Math.max(maxLines, lines.length);
+      }
+    });
+    const h = Math.max(7, maxLines * 4 + 2);
+
+    if (hasSpan) {
+      const cell = rowData.find((c) => c.colSpan === 2);
+      if (cell.fill) {
+        doc.setFillColor(...cell.fillColor);
+        doc.rect(xStart, y, colRight, h, "F");
+      }
+      doc.setDrawColor(0);
+      doc.rect(xStart, y, colRight, h, "S");
+      setFont(7.5, cell.bold ? "bold" : "normal");
+      if (cell.text && !cell.bold) {
+        const lines = doc.splitTextToSize(cell.text || "", colRight - 2);
+        lines.forEach((line, li) => {
+          const lx = cell.align === "center" ? xStart + colRight / 2 : xStart + 1;
+          doc.text(line, lx, y + 3 + li * 4 + 7.5 * 0.35, {
+            align: cell.align === "center" ? "center" : "left",
+          });
+        });
+      } else {
+        doc.text(cell.text || "", xStart + 1, y + h / 2 + 7.5 * 0.35, {
+          align: cell.align === "center" ? "center" : "left",
+          maxWidth: colRight - 2,
+        });
+      }
+    } else {
+      rowData.forEach((cell, ci) => {
+        const cx = xStart + ci * colW;
+        if (cell.fill) {
+          doc.setFillColor(...cell.fillColor);
+          doc.rect(cx, y, colW, h, "F");
+        }
+        doc.setDrawColor(0);
+        doc.rect(cx, y, colW, h, "S");
+        setFont(7.5, cell.bold ? "bold" : "normal");
+        if (cell.text && !cell.bold) {
+          const lines = doc.splitTextToSize(cell.text || "", colW - 2);
+          lines.forEach((line, li) => {
+            const lx = cell.align === "center" ? cx + colW / 2 : cx + 1;
+            doc.text(line, lx, y + 3 + li * 4 + 7.5 * 0.35, {
+              align: cell.align === "center" ? "center" : "left",
+            });
+          });
+        } else {
+          doc.text(cell.text || "", cx + 1, y + h / 2 + 7.5 * 0.35, {
+            align: cell.align === "center" ? "center" : "left",
+            maxWidth: colW - 2,
+          });
+        }
+      });
+    }
+    y += h;
   });
 
-  y += sellerH + 2;
+  const metaBlockEnd = y;
+  y = Math.max(sellerBlockEnd, metaBlockEnd) + 1;
 
-  // --- BUYER (Left) vs PACKING/DEST (Right) ---
+  // --- BUYER block (left) ---
   const buyerLines = [
-    buyer.name,
-    buyer.addr1,
-    buyer.addr2,
-    buyer.gst ? `GST: ${buyer.gst}` : "",
-    buyer.pan ? `PAN: ${buyer.pan}` : "",
-    buyer.contact ? `CONTACT : ${buyer.contact}` : "",
-    buyer.email ? `EMAIL : ${buyer.email}` : "",
-  ].filter(Boolean);
-
-  // Notify Party
-  const hasNotify = Object.values(notifyParty).some((v) => v && v.trim());
-  if (hasNotify) {
-    buyerLines.push("");
-    buyerLines.push("NOTIFY PARTY:");
-    if (notifyParty.name) buyerLines.push(notifyParty.name);
-    if (notifyParty.addr1) buyerLines.push(notifyParty.addr1);
-    if (notifyParty.addr2) buyerLines.push(notifyParty.addr2);
-    if (notifyParty.email) buyerLines.push(`EMAIL : ${notifyParty.email}`);
-    if (notifyParty.contact) buyerLines.push(`CONTACT : ${notifyParty.contact}`);
+    { text: "BUYER / CONSIGNEE", bold: true },
+  ];
+  if (buyer.name) buyerLines.push({ text: buyer.name, bold: true });
+  if (buyer.addr1) buyerLines.push({ text: buyer.addr1 });
+  if (buyer.addr2) buyerLines.push({ text: buyer.addr2 });
+  
+  let gstPanParts = [];
+  if (buyer.gst) gstPanParts.push(`GST: ${buyer.gst}`);
+  if (buyer.pan) gstPanParts.push(`PAN: ${buyer.pan}`);
+  if (gstPanParts.length > 0) {
+    buyerLines.push({ text: gstPanParts.join("     ") });
   }
+  
+  if (buyer.contact) buyerLines.push({ text: `CONTACT : ${buyer.contact}` });
+  if (buyer.email) buyerLines.push({ text: `EMAIL : ${buyer.email}` });
+  
+  // --- NOTIFY PARTY block construction ---
+  const notifyLines = [
+    { text: "NOTIFY PARTY", bold: true },
+  ];
+  if (notifyParty.name && notifyParty.name !== "—") {
+    notifyLines.push({ text: notifyParty.name, bold: true });
+  }
+  if (notifyParty.addr1) notifyLines.push({ text: notifyParty.addr1 });
+  if (notifyParty.addr2) notifyLines.push({ text: notifyParty.addr2 });
+  if (notifyParty.email) notifyLines.push({ text: `EMAIL : ${notifyParty.email}` });
+  if (notifyParty.contact) notifyLines.push({ text: `CONTACT : ${notifyParty.contact}` });
 
-  const rightLines = [
-    "PACKING",
-    meta.packing || "",
-    "",
-    "PAYMENT TERMS",
-    meta.paymentTerms || "",
-    "",
-    "ORIGIN OF GOODS",
-    meta.originOfGoods || "",
-  ].filter(line => line !== "");
+  const hasNotify = notifyLines.length > 1;
 
-  // Render buyer block
-  const buyerBoxH = drawTextBox(ml, y, colLeft, "BUYER / CONSIGNEE", buyerLines);
+  borderedBlock(ml, colLeft, buyerLines, { lineH: 4.0, fontSize: 7.5 });
+  const buyerBlockEnd = y;
 
-  // Render right text box (Packing details)
-  const rightBoxH = drawTextBox(ml + colLeft, y, colRight, "PACKING & SHIPPED DETAILS", rightLines);
+  if (hasNotify) {
+    borderedBlock(ml, colLeft, notifyLines, { lineH: 4.0, fontSize: 7.5 });
+  }
+  const notifyBlockEnd = y;
 
-  const maxSectionH = Math.max(buyerBoxH, rightBoxH);
-  y += maxSectionH + 3;
+  // --- MISC block (right) ---
+  y = metaBlockEnd;
+  const miscData = [
+    [
+      { text: "PACKING", colSpan: 2, bold: true, fill: true, fillColor: [233, 233, 233] },
+    ],
+    [
+      { text: meta.packing || "", colSpan: 2 },
+    ],
+    [
+      { text: "PAYMENT TERMS", colSpan: 2, bold: true, fill: true, fillColor: [233, 233, 233] },
+    ],
+    [
+      { text: meta.paymentTerms || "", colSpan: 2 },
+    ],
+    [
+      { text: "ORIGIN OF GOODS", colSpan: 2, bold: true, fill: true, fillColor: [233, 233, 233] },
+    ],
+    [
+      { text: meta.originOfGoods || "", colSpan: 2 },
+    ],
+  ];
+
+  miscData.forEach((rowData) => {
+    const cell = rowData[0];
+    const xStart = ml + colLeft;
+
+    // Calculate height for text wrapping
+    let reqH = 7;
+    if (cell.text && !cell.bold) {
+      setFont(7.5, "normal");
+      const lines = doc.splitTextToSize(cell.text || "", colRight - 2);
+      reqH = Math.max(7, lines.length * 4 + 2);
+    }
+    const h = reqH;
+
+    if (cell.fill) {
+      doc.setFillColor(...cell.fillColor);
+      doc.rect(xStart, y, colRight, h, "F");
+    }
+    doc.setDrawColor(0);
+    doc.rect(xStart, y, colRight, h, "S");
+    setFont(7.5, cell.bold ? "bold" : "normal");
+
+    if (cell.text && !cell.bold) {
+      const lines = doc.splitTextToSize(cell.text || "", colRight - 2);
+      lines.forEach((line, li) => {
+        const lx = cell.align === "center" ? xStart + colRight / 2 : xStart + 1;
+        doc.text(line, lx, y + 3 + li * 4 + 7.5 * 0.35, {
+          align: cell.align === "center" ? "center" : "left",
+        });
+      });
+    } else {
+      doc.text(cell.text || "", xStart + 1, y + h / 2 + 7.5 * 0.35, {
+        align: cell.align === "center" ? "center" : "left",
+        maxWidth: colRight - 2,
+      });
+    }
+    y += h;
+  });
+
+  y = Math.max(y, notifyBlockEnd) + 1;
 
   // --- ITEMS TABLE ---
   const tableBody = packingItems.map((it, i) => {
