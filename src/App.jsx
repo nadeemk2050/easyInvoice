@@ -1578,42 +1578,54 @@ export default function App() {
               </div>
             )}
 
-            {/* Title Configuration */}
             <div style={{ marginTop: 12, padding: "8px", border: "1px solid #e8e8e8", borderRadius: 6, background: "#fafafa" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#555", marginBottom: 6 }}>Invoice Heading:</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#555", marginBottom: 6 }}>
+                {isPackingMode ? "Document Heading:" : "Invoice Heading:"}
+              </div>
               <div style={{ marginBottom: 6 }}>
-                <select
-                  value={["COMMERCIAL INVOICE", "INVOICE", "TAX INVOICE", "PROFORMA INVOICE"].includes(titleText) ? titleText : "CUSTOM"}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val !== "CUSTOM") {
-                      setTitleText(val);
-                      localStorage.setItem(_uid + "_easyinvoice_titleText", val);
-                    } else {
-                      setTitleText("");
-                      localStorage.setItem(_uid + "_easyinvoice_titleText", "");
-                    }
-                  }}
-                  style={{ display: "block", width: "100%", padding: "5px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 4, outline: "none", boxSizing: "border-box" }}
-                >
-                  <option value="COMMERCIAL INVOICE">COMMERCIAL INVOICE</option>
-                  <option value="INVOICE">INVOICE</option>
-                  <option value="TAX INVOICE">TAX INVOICE</option>
-                  <option value="PROFORMA INVOICE">PROFORMA INVOICE</option>
-                  <option value="CUSTOM">Custom Heading...</option>
-                </select>
-                {!["COMMERCIAL INVOICE", "INVOICE", "TAX INVOICE", "PROFORMA INVOICE"].includes(titleText) ? (
+                {isPackingMode ? (
                   <input
                     type="text"
-                    value={titleText}
-                    onChange={(e) => {
-                      setTitleText(e.target.value);
-                      localStorage.setItem(_uid + "_easyinvoice_titleText", e.target.value);
-                    }}
-                    placeholder="Enter custom heading"
-                    style={{ display: "block", width: "100%", marginTop: 4, padding: "5px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 4, boxSizing: "border-box" }}
+                    disabled
+                    value="PACKING LIST"
+                    style={{ display: "block", width: "100%", padding: "5px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 4, boxSizing: "border-box", background: "#eee", cursor: "not-allowed" }}
                   />
-                ) : null}
+                ) : (
+                  <>
+                    <select
+                      value={["COMMERCIAL INVOICE", "INVOICE", "TAX INVOICE", "PROFORMA INVOICE"].includes(titleText) ? titleText : "CUSTOM"}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val !== "CUSTOM") {
+                          setTitleText(val);
+                          localStorage.setItem(_uid + "_easyinvoice_titleText", val);
+                        } else {
+                          setTitleText("");
+                          localStorage.setItem(_uid + "_easyinvoice_titleText", "");
+                        }
+                      }}
+                      style={{ display: "block", width: "100%", padding: "5px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 4, outline: "none", boxSizing: "border-box" }}
+                    >
+                      <option value="COMMERCIAL INVOICE">COMMERCIAL INVOICE</option>
+                      <option value="INVOICE">INVOICE</option>
+                      <option value="TAX INVOICE">TAX INVOICE</option>
+                      <option value="PROFORMA INVOICE">PROFORMA INVOICE</option>
+                      <option value="CUSTOM">Custom Heading...</option>
+                    </select>
+                    {!["COMMERCIAL INVOICE", "INVOICE", "TAX INVOICE", "PROFORMA INVOICE"].includes(titleText) ? (
+                      <input
+                        type="text"
+                        value={titleText}
+                        onChange={(e) => {
+                          setTitleText(e.target.value);
+                          localStorage.setItem(_uid + "_easyinvoice_titleText", e.target.value);
+                        }}
+                        placeholder="Enter custom heading"
+                        style={{ display: "block", width: "100%", marginTop: 4, padding: "5px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 4, boxSizing: "border-box" }}
+                      />
+                    ) : null}
+                  </>
+                )}
               </div>
 
               <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
