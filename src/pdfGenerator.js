@@ -762,3 +762,334 @@ export async function generateInvoicePdf(invoiceData) {
   doc.save(filename);
   return filename;
 }
+
+export async function generatePackingListPdf(packingData) {
+  const {
+    seller,
+    buyer,
+    notifyParty = { name: "", addr1: "", addr2: "", email: "", contact: "" },
+    meta,
+    packingItems = [],
+    logo,
+    signature,
+    stamp,
+    logoWidth = 50,
+    logoHeight = 14,
+    sigWidth = 35,
+    sigHeight = 12,
+    stampWidth = 36,
+    stampHeight = 18,
+    titleText = "PACKING LIST",
+    titleFontSize = 16,
+    titleAlign = "right",
+    titleXOffset = 0,
+    titleYOffset = 0,
+  } = packingData;
+
+  const cleanLogo = logo ? await removeTransparency(logo) : null;
+  const cleanSignature = signature ? await removeTransparency(signature) : null;
+  const cleanStamp = stamp ? await removeTransparency(stamp) : null;
+
+  // Weights Calculations
+  const totalGross = packingItems.reduce((s, it) => s + (parseFloat(it.grossWeight) || 0), 0);
+  const totalTare = packingItems.reduce((s, it) => s + (parseFloat(it.tareWeight) || 0), 0);
+  const totalNet = packingItems.reduce((s, it) => s + (parseFloat(it.netWeight) || 0), 0);
+
+  const fmtDate = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso + "T00:00:00");
+    if (isNaN(d)) return iso;
+    return d
+      .toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "2-digit",
+      })
+      .replace(/ /g, "-");
+  };
+
+  // Initialize jsPDF
+  const doc = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4",
+  });
+
+  const ml = 12;
+  const mr = 12;
+  const usable = 210 - ml - mr; // 186
+  const colLeft = 93;
+  const colRight = 93;
+
+  let y = 14;
+
+  const setFont = (size, style = "normal") => {
+    doc.setFont("Helvetica", style);
+    doc.setFontSize(size);
+  };
+
+  // --- HEADER SECTION (Logo + Title) ---
+  if (cleanLogo) {
+    try {
+      const format = getImageFormat(cleanLogo);
+      doc.addImage(cleanLogo, format, ml, y, logoWidth, logoHeight);
+    } catch (e) {
+      try { doc.addImage(cleanLogo, ml, y, logoWidth, logoHeight); } catch (e2) {}
+    }
+  } else {
+    setFont(12, "bold");
+    doc.text(seller.name || "YOUR COMPANY", ml, y + 8);
+  }
+
+  // Draw Title
+  setFont(titleFontSize, "bold");
+  const actualTitle = titleText || "PACKING LIST";
+  const titleW = doc.getTextWidth(actualTitle);
+  let titleX = ml + usable - titleW;
+  if (titleAlign === "left") titleX = ml;
+  else if (titleAlign === "center") titleX = ml + usable / 2 - titleW / 2;
+  titleX += titleXOffset;
+  const titleY = y + 8 + titleYOffset;
+
+  doc.text(actualTitle, titleX, titleY);
+  y += Math.max(logoHeight, 14) + 4;
+
+  // Helper block drawer
+  const drawTextBox = (x, yBox, w, title, lines) => {
+    let boxH = lines.length * 4.2 + 6;
+    doc.setFillColor(233, 233, 233);
+    doc.rect(x, yBox, w, 5, "F");
+    doc.rect(x, yBox, w, boxH, "S");
+    setFont(7.5, "bold");
+    doc.text(title, x + 1.5, yBox + 3.5);
+    setFont(7.5, "normal");
+    lines.forEach((line, i) => {
+      doc.text(line, x + 1.5, yBox + 7.5 + i * 4.2);
+    });
+    return boxH;
+  };
+
+  // --- SELLER (Left) vs META (Right) ---
+  const sellerLines = [
+    seller.name,
+    seller.addr1,
+    seller.addr2,
+    seller.trn ? `TRN NO : ${seller.trn}` : "",
+    seller.contact ? `CONTACT : ${seller.contact}` : "",
+    seller.email ? `EMAIL : ${seller.email}` : "",
+  ].filter(Boolean);
+
+  // Draw Seller block
+  const sellerH = drawTextBox(ml, y, colLeft, "SELLER", sellerLines);
+
+  // Draw Meta Table
+  const metaTableStartY = y;
+  doc.rect(ml + colLeft, metaTableStartY, colRight, sellerH, "S");
+  
+  // Custom cell height calculations to split meta cells
+  const rows = [
+    [{ text: "INVOICE / REF NO", bold: true }, { text: "DATE", bold: true }],
+    [{ text: meta.invoiceNo || "" }, { text: fmtDate(meta.date) || "" }],
+    [{ text: "SUPPLIER PO", bold: true }, { text: "PO DATE", bold: true }],
+    [{ text: meta.supplierPo || "" }, { text: fmtDate(meta.poDate) || "" }],
+    [{ text: "TRANSPORT TYPE", bold: true }, { text: "DRIVER /VESSEL NO", bold: true }],
+    [{ text: meta.transportType || "" }, { text: meta.driverVessel || "" }],
+    [{ text: "LOADING AT", bold: true }, { text: "FINAL DESTINATION", bold: true }],
+    [{ text: meta.loadingAt || "" }, { text: meta.finalDestination || "" }],
+  ];
+
+  let metaY = metaTableStartY;
+  const rowH = sellerH / 8; // split seller box height into equal 8 rows
+  rows.forEach((row, rowIndex) => {
+    const isHeading = rowIndex % 2 === 0;
+    if (isHeading) {
+      doc.setFillColor(233, 233, 233);
+      doc.rect(ml + colLeft, metaY, colRight, rowH, "F");
+    }
+    // Draw cells
+    doc.rect(ml + colLeft, metaY, colRight / 2, rowH, "S");
+    doc.rect(ml + colLeft + colRight / 2, metaY, colRight / 2, rowH, "S");
+
+    setFont(7.0, isHeading ? "bold" : "normal");
+    doc.text(row[0].text, ml + colLeft + 1.5, metaY + rowH / 2 + 7.0 * 0.35, { maxWidth: colRight / 2 - 3 });
+    doc.text(row[1].text, ml + colLeft + colRight / 2 + 1.5, metaY + rowH / 2 + 7.0 * 0.35, { maxWidth: colRight / 2 - 3 });
+    metaY += rowH;
+  });
+
+  y += sellerH + 2;
+
+  // --- BUYER (Left) vs PACKING/DEST (Right) ---
+  const buyerLines = [
+    buyer.name,
+    buyer.addr1,
+    buyer.addr2,
+    buyer.gst ? `GST: ${buyer.gst}` : "",
+    buyer.pan ? `PAN: ${buyer.pan}` : "",
+    buyer.contact ? `CONTACT : ${buyer.contact}` : "",
+    buyer.email ? `EMAIL : ${buyer.email}` : "",
+  ].filter(Boolean);
+
+  // Notify Party
+  const hasNotify = Object.values(notifyParty).some((v) => v && v.trim());
+  if (hasNotify) {
+    buyerLines.push("");
+    buyerLines.push("NOTIFY PARTY:");
+    if (notifyParty.name) buyerLines.push(notifyParty.name);
+    if (notifyParty.addr1) buyerLines.push(notifyParty.addr1);
+    if (notifyParty.addr2) buyerLines.push(notifyParty.addr2);
+    if (notifyParty.email) buyerLines.push(`EMAIL : ${notifyParty.email}`);
+    if (notifyParty.contact) buyerLines.push(`CONTACT : ${notifyParty.contact}`);
+  }
+
+  const rightLines = [
+    "PACKING",
+    meta.packing || "",
+    "",
+    "PAYMENT TERMS",
+    meta.paymentTerms || "",
+    "",
+    "ORIGIN OF GOODS",
+    meta.originOfGoods || "",
+  ].filter(line => line !== "");
+
+  // Render buyer block
+  const buyerBoxH = drawTextBox(ml, y, colLeft, "BUYER / CONSIGNEE", buyerLines);
+
+  // Render right text box (Packing details)
+  const rightBoxH = drawTextBox(ml + colLeft, y, colRight, "PACKING & SHIPPED DETAILS", rightLines);
+
+  const maxSectionH = Math.max(buyerBoxH, rightBoxH);
+  y += maxSectionH + 3;
+
+  // --- ITEMS TABLE ---
+  const tableBody = packingItems.map((it, i) => {
+    return [
+      String(i + 1),
+      it.containerSeal || "",
+      it.typeOfPacking || "",
+      it.descriptionOfGoods || "",
+      `Gross: ${parseFloat(it.grossWeight || 0).toFixed(3)}\nTare: ${parseFloat(it.tareWeight || 0).toFixed(3)}\nNet: ${parseFloat(it.netWeight || 0).toFixed(3)}`,
+    ];
+  });
+
+  const blankRowsTable = Math.max(0, 5 - packingItems.length);
+  for (let i = 0; i < blankRowsTable; i++) {
+    tableBody.push(["", "", "", "", ""]);
+  }
+
+  // Total weight row
+  tableBody.push([
+    {
+      content: "TOTAL WEIGHT (MTS)",
+      styles: { fontStyle: "bold", halign: "center" },
+      colSpan: 4,
+    },
+    {
+      content: `Gross: ${totalGross.toFixed(3)}\nTare: ${totalTare.toFixed(3)}\nNet: ${totalNet.toFixed(3)}`,
+      styles: { fontStyle: "bold", halign: "right" },
+    },
+  ]);
+
+  autoTable(doc, {
+    startY: y,
+    margin: { left: ml, right: mr },
+    tableWidth: usable,
+    head: [
+      [
+        { content: "SR.", styles: { halign: "center" } },
+        { content: "CONTAINER & SEAL NO.", styles: { halign: "center" } },
+        { content: "TYPE OF PACKING", styles: { halign: "center" } },
+        { content: "DESCRIPTION OF GOODS", styles: { halign: "center" } },
+        { content: "QUANTITY (MTS)", styles: { halign: "center" } },
+      ],
+    ],
+    body: tableBody,
+    headStyles: {
+      fillColor: [233, 233, 233],
+      textColor: [0, 0, 0],
+      fontStyle: "bold",
+      fontSize: 8,
+      halign: "center",
+      lineColor: [0, 0, 0],
+      lineWidth: 0.5,
+    },
+    bodyStyles: {
+      fontSize: 8,
+      lineColor: [0, 0, 0],
+      lineWidth: 0.5,
+    },
+    columnStyles: {
+      0: { cellWidth: 12, halign: "center" },
+      1: { cellWidth: 45, halign: "left" },
+      2: { cellWidth: 35, halign: "left" },
+      3: { cellWidth: "auto", halign: "left" },
+      4: { cellWidth: 42, halign: "right" },
+    },
+    didParseCell(data) {
+      if (
+        data.section === "body" &&
+        data.cell.text &&
+        data.cell.text[0] === "TOTAL WEIGHT (MTS)"
+      ) {
+        data.cell.styles.fillColor = [233, 233, 233];
+        data.cell.styles.fontStyle = "bold";
+      }
+    },
+    theme: "grid",
+    tableLineColor: [0, 0, 0],
+    tableLineWidth: 0.5,
+  });
+
+  y = doc.lastAutoTable.finalY + 6;
+
+  // --- SIGNATORY BLOCK ---
+  const sigH = 35;
+  doc.rect(ml, y, usable, sigH, "S");
+
+  setFont(8, "normal");
+  doc.text("FOR", ml + usable - colRight / 2, y + 6, { align: "center" });
+  setFont(8, "bold");
+  doc.text(seller.name, ml + usable - colRight / 2, y + 12, { align: "center" });
+
+  const imgYSign = y + 14;
+  const sigXSign = ml + usable - colRight;
+  if (cleanSignature && cleanStamp) {
+    const leftCenterX = sigXSign + colRight / 4;
+    const rightCenterX = sigXSign + (3 * colRight) / 4;
+    
+    try {
+      const format = getImageFormat(cleanSignature);
+      doc.addImage(cleanSignature, format, leftCenterX - (sigWidth / 2), imgYSign, sigWidth, sigHeight);
+    } catch (e) {
+      try { doc.addImage(cleanSignature, leftCenterX - (sigWidth / 2), imgYSign, sigWidth, sigHeight); } catch (e2) {}
+    }
+    
+    try {
+      const format = getImageFormat(cleanStamp);
+      doc.addImage(cleanStamp, format, rightCenterX - (stampWidth / 2), imgYSign, stampWidth, stampHeight);
+    } catch (e) {
+      try { doc.addImage(cleanStamp, rightCenterX - (stampWidth / 2), imgYSign, stampWidth, stampHeight); } catch (e2) {}
+    }
+  } else if (cleanSignature) {
+    try {
+      const format = getImageFormat(cleanSignature);
+      doc.addImage(cleanSignature, format, sigXSign + colRight / 2 - (sigWidth / 2), imgYSign, sigWidth, sigHeight);
+    } catch (e) {
+      try { doc.addImage(cleanSignature, sigXSign + colRight / 2 - (sigWidth / 2), imgYSign, sigWidth, sigHeight); } catch (e2) {}
+    }
+  } else if (cleanStamp) {
+    try {
+      const format = getImageFormat(cleanStamp);
+      doc.addImage(cleanStamp, format, sigXSign + colRight / 2 - (stampWidth / 2), imgYSign, stampWidth, stampHeight);
+    } catch (e) {
+      try { doc.addImage(cleanStamp, sigXSign + colRight / 2 - (stampWidth / 2), imgYSign, stampWidth, stampHeight); } catch (e2) {}
+    }
+  }
+
+  setFont(8, "normal");
+  doc.text("AUTH SIGNATORY", sigXSign + colRight / 2, y + sigH - 3, { align: "center" });
+
+  const filename = `packing-list-${meta.invoiceNo || "easyInvoice"}.pdf`;
+  doc.save(filename);
+  return filename;
+}

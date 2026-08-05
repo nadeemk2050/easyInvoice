@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, useEffect } from "react";
-import { generateInvoicePdf, numToWords } from "./pdfGenerator";
+import { generateInvoicePdf, generatePackingListPdf, numToWords } from "./pdfGenerator";
 import ManagementMenu from "./ManagementModals";
 import AuthPage from "./AuthPage";
 import { auth, onAuthStateChanged, db } from "./firebase";
@@ -71,6 +71,30 @@ function saveToHistory(invoice) {
 
   list.unshift({ ...cleanInvoice, savedAt: new Date().toISOString() });
   localStorage.setItem(_key("easyinvoice_history"), JSON.stringify(list.slice(0, 50)));
+  return true;
+}
+
+function loadPackingHistory() {
+  try {
+    const raw = localStorage.getItem(_key("easyinvoice_packinghistory"));
+    if (!raw) return [];
+    let list = JSON.parse(raw);
+    if (!Array.isArray(list)) list = [];
+    return list;
+  } catch {
+    return [];
+  }
+}
+
+function saveToPackingHistory(packList) {
+  const list = loadPackingHistory();
+  const dup = list.find((item) => item.meta?.invoiceNo === packList.meta?.invoiceNo);
+  if (dup) return false;
+
+  const { logo: _logo, signature: _signature, stamp: _stamp, ...cleanPackList } = packList;
+
+  list.unshift({ ...cleanPackList, savedAt: new Date().toISOString() });
+  localStorage.setItem(_key("easyinvoice_packinghistory"), JSON.stringify(list.slice(0, 50)));
   return true;
 }
 
@@ -336,6 +360,17 @@ export default function App() {
     },
   ]);
 
+  const [packingItems, setPackingItems] = useState([
+    {
+      containerSeal: "",
+      typeOfPacking: "",
+      descriptionOfGoods: "",
+      grossWeight: "",
+      tareWeight: "",
+      netWeight: "",
+    }
+  ]);
+
   // Load permanent images (initial value, will be updated after auth)
   const [logo, setLogo] = useState(null);
   const [signature, setSignature] = useState(null);
@@ -367,6 +402,9 @@ export default function App() {
   // Invoices list view (open by default)
   const [showHistory, setShowHistory] = useState(true);
   const [history, setHistory] = useState([]);
+  const [isPackingMode, setIsPackingMode] = useState(false);
+  const [showPackingHistory, setShowPackingHistory] = useState(false);
+  const [packingHistory, setPackingHistory] = useState([]);
   const [activeOpts, setActiveOpts] = useState(null);
   const [toast, setToast] = useState("");
 
@@ -391,6 +429,26 @@ export default function App() {
   const addItem = () =>
     setItems([...items, { description: "", qty: "", rate: "", per: "" }]);
   const removeItem = (i) => setItems(items.filter((_, idx) => idx !== i));
+
+  const updatePackingItem = (i, key, val) => {
+    const next = [...packingItems];
+    let nextVal = val;
+    if (key === "grossWeight" || key === "tareWeight") {
+      const gross = key === "grossWeight" ? val : next[i].grossWeight;
+      const tare = key === "tareWeight" ? val : next[i].tareWeight;
+      next[i] = {
+        ...next[i],
+        [key]: val,
+        netWeight: ((parseFloat(gross) || 0) - (parseFloat(tare) || 0)).toFixed(3)
+      };
+    } else {
+      next[i] = { ...next[i], [key]: val };
+    }
+    setPackingItems(next);
+  };
+  const addPackingItem = () =>
+    setPackingItems([...packingItems, { containerSeal: "", typeOfPacking: "", descriptionOfGoods: "", grossWeight: "", tareWeight: "", netWeight: "" }]);
+  const removePackingItem = (i) => setPackingItems(packingItems.filter((_, idx) => idx !== i));
 
   // ---------- calculations ----------
   const totalQty = useMemo(
@@ -478,6 +536,58 @@ export default function App() {
       setPdfError(
         "PDF generation failed. Try 'Print instead' and choose Save as PDF."
       );
+    }
+    setPdfBusy(false);
+  };
+
+  const handleSavePackingList = () => {
+    const data = {
+      seller,
+      buyer,
+      notifyParty,
+      meta,
+      packingItems,
+      logo,
+      signature,
+      stamp,
+    };
+    const saved = saveToPackingHistory(data);
+    setPackingHistory(loadPackingHistory());
+    showToast(saved ? "Packing List saved!" : "Duplicate invoice/reference no — not saved");
+  };
+
+  const handleDownloadPackingList = async () => {
+    setPdfBusy(true);
+    setPdfError("");
+    try {
+      const pdfData = {
+        seller,
+        buyer,
+        notifyParty,
+        meta,
+        packingItems,
+        logo,
+        signature,
+        stamp,
+        logoWidth,
+        logoHeight,
+        sigWidth,
+        sigHeight,
+        stampWidth,
+        stampHeight,
+        titleText: titleText === "COMMERCIAL INVOICE" ? "PACKING LIST" : titleText,
+        titleFontSize,
+        titleAlign,
+        titleXOffset,
+        titleYOffset,
+      };
+      await generatePackingListPdf(pdfData);
+      saveToPackingHistory(pdfData);
+      setPackingHistory(loadPackingHistory());
+      showToast("Packing List downloaded & saved!");
+    } catch (err) {
+      console.error("PDF generation failed", err);
+      setPdfError("PDF generation failed.");
     }
     setPdfBusy(false);
   };
@@ -615,6 +725,7 @@ export default function App() {
         }
       } catch {}
       setHistory(loadHistory());
+      setPackingHistory(loadPackingHistory());
     }
   }, [user]);
 
@@ -710,6 +821,10 @@ export default function App() {
 
         if (Array.isArray(data.easyinvoice_history)) {
           setHistory(data.easyinvoice_history);
+        }
+
+        if (Array.isArray(data.easyinvoice_packinghistory)) {
+          setPackingHistory(data.easyinvoice_packinghistory);
         }
 
         if (Array.isArray(data.easyinvoice_containers)) {
@@ -925,9 +1040,9 @@ export default function App() {
               </p>
             </div>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} />
+              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} />
               <button
-                onClick={() => setShowHistory(false)}
+                onClick={() => { setShowHistory(false); setIsPackingMode(false); }}
                 style={{
                   padding: "10px 20px",
                   fontSize: 13,
@@ -985,7 +1100,7 @@ export default function App() {
                         <div style={{ textAlign: "right", color: "#444" }}>{totalQ ? totalQ.toFixed(2) : "0.00"}</div>
                         <div style={{ textAlign: "right", fontWeight: 600 }}>{totalV ? totalV.toLocaleString("en-US", { minimumFractionDigits: 2 }) : "0.00"}</div>
                         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                          <button onClick={() => loadInvoice(inv)}
+                          <button onClick={() => { loadInvoice(inv); setIsPackingMode(false); }}
                             style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }} title="Edit Invoice">✏️ Edit</button>
                           <button onClick={() => downloadFromHistory(inv)}
                             style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }} title="Download PDF">⬇️ PDF</button>
@@ -1009,7 +1124,154 @@ export default function App() {
         </div>
       )}
 
-      {!showHistory && (
+      {/* Packing Lists Details Panel */}
+      {showPackingHistory && (
+        <div
+          style={{
+            maxWidth: 1200,
+            margin: "0 auto",
+            padding: "40px 20px",
+          }}
+        >
+          {/* Header */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 28,
+            }}
+          >
+            <div>
+              <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900, letterSpacing: "-0.5px" }}>
+                Packing Lists Details
+              </h1>
+              <p style={{ margin: "4px 0 0", fontSize: 13, color: "#666" }}>
+                Manage, edit, and download your saved packing lists.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} />
+              <button
+                onClick={() => {
+                  setShowPackingHistory(false);
+                  setIsPackingMode(true);
+                  // Reset forms to empty packing list
+                  setPackingItems([{ containerSeal: "", typeOfPacking: "", descriptionOfGoods: "", grossWeight: "", tareWeight: "", netWeight: "" }]);
+                }}
+                style={{
+                  padding: "10px 20px",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  border: "none",
+                  borderRadius: 8,
+                  background: "#1c1c1c",
+                  color: "#fff",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
+                }}
+              >
+                ➕ Create Packing List
+              </button>
+            </div>
+          </div>
+
+          {/* List Card */}
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              padding: 28,
+              boxShadow: "0 4px 20px rgba(0,0,0,0.05)",
+            }}
+          >
+            {packingHistory.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px 0", color: "#888" }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+                <p style={{ margin: 0, fontSize: 14 }}>
+                  No saved packing lists yet. Click <strong>Create Packing List</strong> to get started.
+                </p>
+              </div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <div style={{ minWidth: 800 }}>
+                  {/* Column headers */}
+                  <div style={{ display: "grid", gridTemplateColumns: "120px 120px 1.5fr 150px 200px", gap: 10, padding: "12px 8px", borderBottom: "2px solid #1c1c1c", fontSize: 12, fontWeight: 700, color: "#555" }}>
+                    <div>Date</div>
+                    <div>Transport</div>
+                    <div>Invoice No / Packing Ref</div>
+                    <div style={{ textAlign: "right" }}>Total Net Wt (MTS)</div>
+                    <div style={{ textAlign: "right" }}>Actions</div>
+                  </div>
+                  {packingHistory.map((pack, i) => {
+                    const totalNet = pack.packingItems?.reduce((s, it) => s + (parseFloat(it.netWeight) || 0), 0) || 0;
+                    return (
+                      <div key={i} style={{ display: "grid", gridTemplateColumns: "120px 120px 1.5fr 150px 200px", gap: 10, padding: "14px 8px", borderBottom: "1px solid #eee", fontSize: 13, alignItems: "center" }}>
+                        <div style={{ color: "#666" }}>{pack.savedAt ? new Date(pack.savedAt).toLocaleDateString() : ""}</div>
+                        <div style={{ color: "#666" }}>{pack.meta?.transportType || "—"}</div>
+                        <div style={{ fontWeight: 700, color: "#1c1c1c" }}>{pack.meta?.invoiceNo || "—"}</div>
+                        <div style={{ textAlign: "right", fontWeight: 600 }}>{totalNet ? totalNet.toFixed(3) : "0.000"}</div>
+                        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                          <button onClick={() => {
+                            setSeller(pack.seller || seller);
+                            setBuyer(pack.buyer || buyer);
+                            setNotifyParty(pack.notifyParty || notifyParty || {});
+                            setMeta(pack.meta || meta);
+                            setPackingItems(pack.packingItems || packingItems);
+                            if (pack.logo) setLogo(pack.logo);
+                            if (pack.signature) setSignature(pack.signature);
+                            if (pack.stamp) setStamp(pack.stamp);
+                            setShowPackingHistory(false);
+                            setIsPackingMode(true);
+                            showToast("Packing list loaded!");
+                          }}
+                            style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }}>✏️ Edit</button>
+                          <button onClick={() => {
+                            const pdfData = {
+                              ...pack,
+                              logo: pack.logo || logo,
+                              signature: pack.signature || signature,
+                              stamp: pack.stamp || stamp,
+                              logoWidth,
+                              logoHeight,
+                              sigWidth,
+                              sigHeight,
+                              stampWidth,
+                              stampHeight,
+                              titleText: pack.titleText || "PACKING LIST",
+                              titleFontSize,
+                              titleAlign,
+                              titleXOffset,
+                              titleYOffset,
+                            };
+                            generatePackingListPdf(pdfData);
+                            showToast("PDF downloaded!");
+                          }}
+                            style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }}>⬇️ PDF</button>
+                          <button onClick={() => {
+                            const pw = prompt("Enter password 'abcd' to delete this packing list:");
+                            if (pw === "abcd") {
+                              const list = loadPackingHistory();
+                              list.splice(i, 1);
+                              localStorage.setItem(_key("easyinvoice_packinghistory"), JSON.stringify(list));
+                              setPackingHistory(list);
+                            } else if (pw !== null) {
+                              alert("Wrong password!");
+                            }
+                          }}
+                            style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #ffcdd2", borderRadius: 6, background: "#ffe9e9", cursor: "pointer", color: "#b3261e" }}>🗑️</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!showHistory && !showPackingHistory && (
         <div
           className="app-layout"
           style={{
@@ -1044,9 +1306,15 @@ export default function App() {
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} />
+              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} />
               <button
-                onClick={() => setShowHistory(true)}
+                onClick={() => {
+                  if (isPackingMode) {
+                    setShowPackingHistory(true);
+                  } else {
+                    setShowHistory(true);
+                  }
+                }}
                 style={{
                   padding: "6px 12px",
                   fontSize: 12,
@@ -1055,9 +1323,9 @@ export default function App() {
                   borderRadius: 5,
                   background: "#fff",
                 }}
-                title="Invoices List"
+                title={isPackingMode ? "Packing Lists" : "Invoices List"}
               >
-                📋 Invoices List
+                📋 {isPackingMode ? "Packing Lists" : "Invoices List"}
               </button>
               {/* Logout moved to menu */}
             </div>
@@ -1561,187 +1829,231 @@ export default function App() {
             )}
           </Section>
 
-          <Section title="Marks and Numbers">
-            {containers.map((c, i) => (
-              <div key={i} style={{ border: "1px solid #e8e8e8", borderRadius: 6, padding: 8, marginBottom: 8 }}>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <div style={{ flex: 1 }}>
-                    {field(`Container No (${i + 1})`, c.containerNo || "", (v) => {
-                      const next = [...containers];
-                      next[i] = { ...next[i], containerNo: v };
+          {!isPackingMode && (
+            <Section title="Marks and Numbers">
+              {containers.map((c, i) => (
+                <div key={i} style={{ border: "1px solid #e8e8e8", borderRadius: 6, padding: 8, marginBottom: 8 }}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      {field(`Container No (${i + 1})`, c.containerNo || "", (v) => {
+                        const next = [...containers];
+                        next[i] = { ...next[i], containerNo: v };
+                        setContainers(next);
+                        localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify(next));
+                      }, "e.g. MRSU9998798", true)}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      {field(`Seal No (${i + 1})`, c.sealNo || "", (v) => {
+                        const next = [...containers];
+                        next[i] = { ...next[i], sealNo: v };
+                        setContainers(next);
+                        localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify(next));
+                      }, "e.g. ML-AE88786688", true)}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const next = containers.filter((_, idx) => idx !== i);
                       setContainers(next);
                       localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify(next));
-                    }, "e.g. MRSU9998798", true)}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    {field(`Seal No (${i + 1})`, c.sealNo || "", (v) => {
-                      const next = [...containers];
-                      next[i] = { ...next[i], sealNo: v };
-                      setContainers(next);
-                      localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify(next));
-                    }, "e.g. ML-AE88786688", true)}
-                  </div>
+                    }}
+                    style={{ fontSize: 11, color: "#b3261e", background: "none", border: "none", padding: 0, marginTop: 2 }}
+                  >
+                    Remove Container
+                  </button>
                 </div>
-                <button
-                  onClick={() => {
-                    const next = containers.filter((_, idx) => idx !== i);
-                    setContainers(next);
-                    localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify(next));
-                  }}
-                  style={{ fontSize: 11, color: "#b3261e", background: "none", border: "none", padding: 0, marginTop: 2 }}
-                >
-                  Remove Container
-                </button>
+              ))}
+              <button
+                onClick={() => {
+                  const next = [...containers, { containerNo: "", sealNo: "" }];
+                  setContainers(next);
+                  localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify(next));
+                }}
+                style={{ width: "100%", padding: "8px", fontSize: 12, border: "1px dashed #999", borderRadius: 6, background: "#fafafa" }}
+              >
+                + Add More Containers
+              </button>
+            </Section>
+          )}
+
+
+          {isPackingMode ? (
+            <Section title="Packing Details">
+              {packingItems.map((it, i) => (
+                <div key={i} style={{ border: "1px solid #e8e8e8", borderRadius: 6, padding: 8, marginBottom: 8 }}>
+                  {textArea("Container & Seal No.", it.containerSeal || "", (v) => updatePackingItem(i, "containerSeal", v), "", "e.g. 1 x 40\" HC\nCONT : REGU 511023 0\nSL : AEDXB260622")}
+                  {field("Type of Packing", it.typeOfPacking || "", (v) => updatePackingItem(i, "typeOfPacking", v), "e.g. 37 JUMBO BAGS", true)}
+                  {textArea("Description of Goods", it.descriptionOfGoods || "", (v) => updatePackingItem(i, "descriptionOfGoods", v), "", "e.g. PC BOTTLE REGRIND\nHSN CODE : 39074000")}
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      {field("Gross Wt (MTS)", it.grossWeight || "", (v) => updatePackingItem(i, "grossWeight", v), "", true)}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      {field("Tare Wt (MTS)", it.tareWeight || "", (v) => updatePackingItem(i, "tareWeight", v), "", true)}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      {field("Net Wt (MTS)", it.netWeight || "", (v) => updatePackingItem(i, "netWeight", v), "", true)}
+                    </div>
+                  </div>
+                  {packingItems.length > 1 && (
+                    <button
+                      onClick={() => removePackingItem(i)}
+                      style={{ fontSize: 11, color: "#b3261e", background: "none", border: "none", padding: 0, marginTop: 2 }}
+                    >
+                      Remove row
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                onClick={addPackingItem}
+                style={{ width: "100%", padding: "8px", fontSize: 12, border: "1px dashed #999", borderRadius: 6, background: "#fafafa" }}
+              >
+                + Add packing item
+              </button>
+              <div style={{ marginTop: 10 }}>
+                {field("Origin of Goods", meta.originOfGoods, (v) => setMeta({ ...meta, originOfGoods: v }), "", true, "dl-origins")}
               </div>
-            ))}
-            <button
-              onClick={() => {
-                const next = [...containers, { containerNo: "", sealNo: "" }];
-                setContainers(next);
-                localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify(next));
-              }}
-              style={{ width: "100%", padding: "8px", fontSize: 12, border: "1px dashed #999", borderRadius: 6, background: "#fafafa" }}
-            >
-              + Add More Containers
-            </button>
-          </Section>
-
-
-          <Section title="Items Details">
-            {items.map((it, i) => (
-              <div
-                key={i}
+            </Section>
+          ) : (
+            <Section title="Items Details">
+              {items.map((it, i) => (
+                <div
+                  key={i}
+                  style={{
+                    border: "1px solid #e8e8e8",
+                    borderRadius: 6,
+                    padding: 8,
+                    marginBottom: 8,
+                  }}
+                >
+                  {field(
+                    `Material Description (row ${i + 1})`,
+                    it.description,
+                    (v) => updateItem(i, "description", v),
+                    "",
+                    true,
+                    "dl-itemNames"
+                  )}
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      {field("Qty", it.qty, (v) => updateItem(i, "qty", v), "", true)}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      {field("Rate", it.rate, (v) => updateItem(i, "rate", v), "", true)}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      {field("Per", it.per, (v) => updateItem(i, "per", v), "", true, "dl-qtyUnits")}
+                    </div>
+                  </div>
+                  {items.length > 1 && (
+                    <button
+                      onClick={() => removeItem(i)}
+                      style={{
+                        fontSize: 11,
+                        color: "#b3261e",
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        marginTop: 2,
+                      }}
+                    >
+                      Remove row
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                onClick={addItem}
                 style={{
-                  border: "1px solid #e8e8e8",
+                  width: "100%",
+                  padding: "8px",
+                  fontSize: 12,
+                  border: "1px dashed #999",
                   borderRadius: 6,
-                  padding: 8,
-                  marginBottom: 8,
+                  background: "#fafafa",
                 }}
               >
-                {field(
-                  `Material Description (row ${i + 1})`,
-                  it.description,
-                  (v) => updateItem(i, "description", v),
-                  "",
-                  true,
-                  "dl-itemNames"
-                )}
-                <div style={{ display: "flex", gap: 6 }}>
+                + Add line item
+              </button>
+              <div style={{ marginTop: 10 }}>
+                {field("Origin of Goods", meta.originOfGoods, (v) =>
+                  setMeta({ ...meta, originOfGoods: v })
+                , "", true, "dl-origins")}
+                <div style={{ display: "flex", gap: 8 }}>
                   <div style={{ flex: 1 }}>
-                    {field("Qty", it.qty, (v) => updateItem(i, "qty", v), "", true)}
+                    {field("VAT %", String(vatPercent), setVatPercent, "", true)}
                   </div>
                   <div style={{ flex: 1 }}>
-                    {field("Rate", it.rate, (v) => updateItem(i, "rate", v), "", true)}
+                    {field("Advance %", String(advancePercent), setAdvancePercent, "", true)}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    {field("Per", it.per, (v) => updateItem(i, "per", v), "", true, "dl-qtyUnits")}
-                  </div>
-                </div>
-                {items.length > 1 && (
-                  <button
-                    onClick={() => removeItem(i)}
-                    style={{
-                      fontSize: 11,
-                      color: "#b3261e",
-                      background: "none",
-                      border: "none",
-                      padding: 0,
-                      marginTop: 2,
-                    }}
-                  >
-                    Remove row
-                  </button>
-                )}
-              </div>
-            ))}
-            <button
-              onClick={addItem}
-              style={{
-                width: "100%",
-                padding: "8px",
-                fontSize: 12,
-                border: "1px dashed #999",
-                borderRadius: 6,
-                background: "#fafafa",
-              }}
-            >
-              + Add line item
-            </button>
-            <div style={{ marginTop: 10 }}>
-              {field("Origin of Goods", meta.originOfGoods, (v) =>
-                setMeta({ ...meta, originOfGoods: v })
-              , "", true, "dl-origins")}
-              <div style={{ display: "flex", gap: 8 }}>
-                <div style={{ flex: 1 }}>
-                  {field("VAT %", String(vatPercent), setVatPercent, "", true)}
-                </div>
-                <div style={{ flex: 1 }}>
-                  {field("Advance %", String(advancePercent), setAdvancePercent, "", true)}
                 </div>
               </div>
-            </div>
-          </Section>
+            </Section>
+          )}
 
-          <Section title="Bank details">
-            {dlBanks && dlBanks.length > 0 && (
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>Select Saved Bank</label>
-                <select 
-                  onChange={(e) => {
-                    const idx = e.target.value;
-                    if (idx !== "") {
-                      const selected = dlBanks[idx];
-                      setBank({
-                        accName: selected.accName || "",
-                        bankName: selected.bankName || "",
-                        accNo: selected.accNo || "",
-                        iban: selected.iban || "",
-                        swift: selected.swift || "",
-                        address: selected.address || "",
-                      });
-                    }
-                  }}
-                  style={{ display: "block", width: "100%", marginTop: 3, padding: "7px 8px", fontSize: 13, border: "1px solid #d4d4d4", borderRadius: 5, outline: "none", background: "#fff", fontFamily: "inherit" }}
-                >
-                  <option value="">-- Choose a Saved Bank --</option>
-                  {dlBanks.map((bk, idx) => (
-                    <option key={idx} value={idx}>{bk.bankName} ({bk.accNo})</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            {field("Account Name", bank.accName, (v) =>
-              setBank({ ...bank, accName: v })
-            )}
-            {field("Bank Name", bank.bankName, (v) =>
-              setBank({ ...bank, bankName: v })
-            )}
-            {field("Account No", bank.accNo, (v) =>
-              setBank({ ...bank, accNo: v })
-            )}
-            {field("IBAN No", bank.iban, (v) =>
-              setBank({ ...bank, iban: v })
-            )}
-            {field("Swift No", bank.swift, (v) =>
-              setBank({ ...bank, swift: v })
-            )}
-            {field("Address", bank.address, (v) =>
-              setBank({ ...bank, address: v })
-            )}
-          </Section>
+          {!isPackingMode && (
+            <Section title="Bank details">
+              {dlBanks && dlBanks.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>Select Saved Bank</label>
+                  <select 
+                    onChange={(e) => {
+                      const idx = e.target.value;
+                      if (idx !== "") {
+                        const selected = dlBanks[idx];
+                        setBank({
+                          accName: selected.accName || "",
+                          bankName: selected.bankName || "",
+                          accNo: selected.accNo || "",
+                          iban: selected.iban || "",
+                          swift: selected.swift || "",
+                          address: selected.address || "",
+                        });
+                      }
+                    }}
+                    style={{ display: "block", width: "100%", marginTop: 3, padding: "7px 8px", fontSize: 13, border: "1px solid #d4d4d4", borderRadius: 5, outline: "none", background: "#fff", fontFamily: "inherit" }}
+                  >
+                    <option value="">-- Choose a Saved Bank --</option>
+                    {dlBanks.map((bk, idx) => (
+                      <option key={idx} value={idx}>{bk.bankName} ({bk.accNo})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {field("Account Name", bank.accName, (v) =>
+                setBank({ ...bank, accName: v })
+              )}
+              {field("Bank Name", bank.bankName, (v) =>
+                setBank({ ...bank, bankName: v })
+              )}
+              {field("Account No", bank.accNo, (v) =>
+                setBank({ ...bank, accNo: v })
+              )}
+              {field("IBAN No", bank.iban, (v) =>
+                setBank({ ...bank, iban: v })
+              )}
+              {field("Swift No", bank.swift, (v) =>
+                setBank({ ...bank, swift: v })
+              )}
+              {field("Address", bank.address, (v) =>
+                setBank({ ...bank, address: v })
+              )}
+            </Section>
+          )}
 
           <button
-            onClick={() => {
+            onClick={isPackingMode ? handleSavePackingList : () => {
               const data = { seller, buyer, notifyParty, containers, meta, bank, items, vatPercent: parseFloat(vatPercent) || 0, advancePercent: parseFloat(advancePercent) || 0, logo, signature, stamp };
               const saved = saveToHistory(data);
               setHistory(loadHistory());
               showToast(saved ? "Invoice saved!" : "Duplicate invoice no — not saved");
             }}
             style={{ width: "100%", padding: "10px", fontSize: 12, fontWeight: 600, color: "#1c1c1c", background: "#fff", border: "1px solid #1c1c1c", borderRadius: 7, marginTop: 4, cursor: "pointer" }}>
-            💾 Save Invoice
+            💾 Save {isPackingMode ? "Packing List" : "Invoice"}
           </button>
           <button
-            onClick={downloadPDF}
+            onClick={isPackingMode ? handleDownloadPackingList : downloadPDF}
             disabled={pdfBusy}
             style={{
               width: "100%",
@@ -1755,7 +2067,7 @@ export default function App() {
               marginTop: 6,
             }}
           >
-            {pdfBusy ? "Generating PDF…" : "⬇ Download PDF"}
+            {pdfBusy ? "Generating PDF…" : `⬇ Download ${isPackingMode ? "Packing List" : "PDF"}`}
           </button>
           <button
             onClick={() => window.print()}
@@ -2226,140 +2538,231 @@ export default function App() {
             }}
           >
             <thead>
-              <tr>
-                <td
-                  style={td({
-                    fontWeight: 700,
-                    background: "#e9e9e9",
-                    textAlign: "center",
-                    width: "6%",
-                  })}
-                >
-                  SR.
-                </td>
-                <td
-                  style={td({
-                    fontWeight: 700,
-                    background: "#e9e9e9",
-                    textAlign: "center",
-                  })}
-                >
-                  MATERIAL DESCRIPTION
-                </td>
-                <td
-                  style={td({
-                    fontWeight: 700,
-                    background: "#e9e9e9",
-                    textAlign: "center",
-                    width: "10%",
-                  })}
-                >
-                  QTY
-                </td>
-                <td
-                  style={td({
-                    fontWeight: 700,
-                    background: "#e9e9e9",
-                    textAlign: "center",
-                    width: "10%",
-                  })}
-                >
-                  RATE
-                </td>
-                <td
-                  style={td({
-                    fontWeight: 700,
-                    background: "#e9e9e9",
-                    textAlign: "center",
-                    width: "8%",
-                  })}
-                >
-                  PER
-                </td>
-                <td
-                  style={td({
-                    fontWeight: 700,
-                    background: "#e9e9e9",
-                    textAlign: "center",
-                    width: "14%",
-                  })}
-                >
-                  AMOUNT
-                </td>
-              </tr>
+              {isPackingMode ? (
+                <tr>
+                  <td style={td({ fontWeight: 700, background: "#e9e9e9", textAlign: "center", width: "6%" })}>
+                    SR.
+                  </td>
+                  <td style={td({ fontWeight: 700, background: "#e9e9e9", textAlign: "center", width: "25%" })}>
+                    CONTAINER & SEAL NO.
+                  </td>
+                  <td style={td({ fontWeight: 700, background: "#e9e9e9", textAlign: "center", width: "20%" })}>
+                    TYPE OF PACKING
+                  </td>
+                  <td style={td({ fontWeight: 700, background: "#e9e9e9", textAlign: "center" })}>
+                    DESCRIPTION OF GOODS
+                  </td>
+                  <td style={td({ fontWeight: 700, background: "#e9e9e9", textAlign: "center", width: "22%" })}>
+                    QUANTITY (MTS)
+                  </td>
+                </tr>
+              ) : (
+                <tr>
+                  <td style={td({ fontWeight: 700, background: "#e9e9e9", textAlign: "center", width: "6%" })}>
+                    SR.
+                  </td>
+                  <td style={td({ fontWeight: 700, background: "#e9e9e9", textAlign: "center" })}>
+                    MATERIAL DESCRIPTION
+                  </td>
+                  <td style={td({ fontWeight: 700, background: "#e9e9e9", textAlign: "center", width: "10%" })}>
+                    QTY
+                  </td>
+                  <td style={td({ fontWeight: 700, background: "#e9e9e9", textAlign: "center", width: "10%" })}>
+                    RATE
+                  </td>
+                  <td style={td({ fontWeight: 700, background: "#e9e9e9", textAlign: "center", width: "8%" })}>
+                    PER
+                  </td>
+                  <td style={td({ fontWeight: 700, background: "#e9e9e9", textAlign: "center", width: "14%" })}>
+                    AMOUNT
+                  </td>
+                </tr>
+              )}
             </thead>
             <tbody>
-              {items.map((it, i) => {
-                const amt =
-                  (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0);
-                return (
-                  <tr key={i}>
-                    <td style={td({ textAlign: "center" })}>{i + 1}</td>
-                    <td style={td()}>{it.description}</td>
-                    <td style={td({ textAlign: "right" })}>{it.qty}</td>
-                    <td style={td({ textAlign: "right" })}>{it.rate}</td>
-                    <td style={td({ textAlign: "center" })}>{it.per}</td>
-                    <td style={td({ textAlign: "right" })}>
-                      {amt ? money(amt) : ""}
+              {isPackingMode ? (
+                <>
+                  {packingItems.map((it, i) => (
+                    <tr key={i}>
+                      <td style={td({ textAlign: "center" })}>{i + 1}</td>
+                      <td style={td({ whiteSpace: "pre-line" })}>{it.containerSeal}</td>
+                      <td style={td({ whiteSpace: "pre-line" })}>{it.typeOfPacking}</td>
+                      <td style={td({ whiteSpace: "pre-line" })}>{it.descriptionOfGoods}</td>
+                      <td style={td({ textAlign: "right" })}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10 }}><span>Gross:</span><span>{parseFloat(it.grossWeight || 0).toFixed(3)}</span></div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10 }}><span>Tare:</span><span>{parseFloat(it.tareWeight || 0).toFixed(3)}</span></div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, borderTop: "1px solid #ddd", marginTop: 2, paddingTop: 1, fontWeight: "bold" }}><span>Net:</span><span>{parseFloat(it.netWeight || 0).toFixed(3)}</span></div>
+                      </td>
+                    </tr>
+                  ))}
+                  {Array.from({ length: Math.max(0, 5 - packingItems.length) }).map((_, i) => (
+                    <tr key={"blank_pack" + i}>
+                      <td style={td()}>&nbsp;</td>
+                      <td style={td()}></td>
+                      <td style={td()}></td>
+                      <td style={td()}></td>
+                      <td style={td()}></td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td style={td({ fontWeight: 700, textAlign: "center", background: "#e9e9e9" })} colSpan={4}>
+                      TOTAL WEIGHT (MTS)
+                    </td>
+                    <td style={td({ fontWeight: 700, textAlign: "right", background: "#e9e9e9" })}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10 }}><span>Gross:</span><span>{packingItems.reduce((s, it) => s + (parseFloat(it.grossWeight) || 0), 0).toFixed(3)}</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10 }}><span>Tare:</span><span>{packingItems.reduce((s, it) => s + (parseFloat(it.tareWeight) || 0), 0).toFixed(3)}</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, borderTop: "1px solid #888", marginTop: 2, paddingTop: 1, fontWeight: "bold" }}><span>Net:</span><span>{packingItems.reduce((s, it) => s + (parseFloat(it.netWeight) || 0), 0).toFixed(3)}</span></div>
                     </td>
                   </tr>
-                );
-              })}
-              {Array.from({ length: blankRows }).map((_, i) => (
-                <tr key={"blank" + i}>
-                  <td style={td()}>&nbsp;</td>
-                  <td style={td()}></td>
-                  <td style={td()}></td>
-                  <td style={td()}></td>
-                  <td style={td()}></td>
-                  <td style={td()}></td>
+                </>
+              ) : (
+                <>
+                  {items.map((it, i) => {
+                    const amt = (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0);
+                    return (
+                      <tr key={i}>
+                        <td style={td({ textAlign: "center" })}>{i + 1}</td>
+                        <td style={td()}>{it.description}</td>
+                        <td style={td({ textAlign: "right" })}>{it.qty}</td>
+                        <td style={td({ textAlign: "right" })}>{it.rate}</td>
+                        <td style={td({ textAlign: "center" })}>{it.per}</td>
+                        <td style={td({ textAlign: "right" })}>
+                          {amt ? money(amt) : ""}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {Array.from({ length: blankRows }).map((_, i) => (
+                    <tr key={"blank" + i}>
+                      <td style={td()}>&nbsp;</td>
+                      <td style={td()}></td>
+                      <td style={td()}></td>
+                      <td style={td()}></td>
+                      <td style={td()}></td>
+                      <td style={td()}></td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td style={td({ fontWeight: 700, textAlign: "center", background: "#e9e9e9" })} colSpan={2}>
+                      TOTAL
+                    </td>
+                    <td style={td({ fontWeight: 700, textAlign: "right", background: "#e9e9e9" })}>
+                      {totalQty ? totalQty.toFixed(3) : ""}
+                    </td>
+                    <td style={td({ background: "#e9e9e9" })}></td>
+                    <td style={td({ fontWeight: 700, textAlign: "center", background: "#e9e9e9" })}>
+                      {meta.currency}
+                    </td>
+                    <td style={td({ fontWeight: 700, textAlign: "right", background: "#e9e9e9" })}>
+                      {money(subtotal)}
+                    </td>
+                  </tr>
+                </>
+              )}
+            </tbody>
+          </table>
+
+          {/* Amount in words + totals (Only in invoice mode) */}
+          {!isPackingMode && (
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                marginTop: 10,
+              }}
+            >
+              <tbody>
+                <tr>
+                  <td
+                    style={td({
+                      width: "55%",
+                      border: "none",
+                      verticalAlign: "top",
+                    })}
+                  >
+                    {renderMarksAndNo()}
+                    <table style={{ width: "100%", borderCollapse: "collapse", marginTop: hasContainers ? 10 : 0 }}>
+                      <tbody>
+                        <tr>
+                          <td
+                            style={td({
+                              fontWeight: 700,
+                              background: "#e9e9e9",
+                            })}
+                          >
+                            AMOUNT IN WORDS
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={td({ minWidth: 0, height: 40 })}>
+                            {meta.amountInWords || autoWords}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </td>
+                  <td
+                    style={td({
+                      width: "45%",
+                      border: "none",
+                      verticalAlign: "top",
+                    })}
+                  >
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <tbody>
+                        <tr>
+                          <td style={td({ border: "none" })}>
+                            VAT @ {vatPercent}%
+                          </td>
+                          <td style={td({ textAlign: "right" })}>
+                            {vatAmount ? money(vatAmount) : "-"}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={td({ border: "none", fontWeight: 700 })}>
+                            TOTAL INCL VAT
+                          </td>
+                          <td style={td({ textAlign: "right", fontWeight: 700 })}>
+                            {money(totalInclVat)}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={td({ border: "none" })}>
+                            ADVANCE {advancePercent}%
+                          </td>
+                          <td style={td({ textAlign: "right" })}>
+                            {money(advanceAmt)}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td
+                            style={td({
+                              border: "none",
+                              fontWeight: 700,
+                              color: "#1a4fa0",
+                            })}
+                          >
+                            BALANCE TO PAY
+                          </td>
+                          <td
+                            style={td({
+                              textAlign: "right",
+                              fontWeight: 700,
+                              color: "#1a4fa0",
+                            })}
+                          >
+                            {money(balance)}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </td>
                 </tr>
-              ))}
-              {/* ORIGIN OF GOODS moved under Payment Terms */}
-              <tr>
-                <td
-                  style={td({
-                    fontWeight: 700,
-                    textAlign: "center",
-                    background: "#e9e9e9",
-                  })}
-                  colSpan={2}
-                >
-                  TOTAL
-                </td>
-                <td
-                  style={td({
-                    fontWeight: 700,
-                    textAlign: "right",
-                    background: "#e9e9e9",
-                  })}
-                >
-                  {totalQty ? totalQty.toFixed(3) : ""}
-                </td>
-                <td style={td({ background: "#e9e9e9" })}></td>
-                <td
-                  style={td({
-                    fontWeight: 700,
-                    textAlign: "center",
-                    background: "#e9e9e9",
-                  })}
-                >
-                  {meta.currency}
-                </td>
-                <td
-                  style={td({
-                    fontWeight: 700,
-                    textAlign: "right",
-                    background: "#e9e9e9",
-                  })}
-                >
-                  {money(subtotal)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          )}
 
-          {/* Amount in words + totals */}
+          {/* Bank details + Signature (Bank details only in invoice mode, Signature in both) */}
           <table
             style={{
               width: "100%",
@@ -2376,138 +2779,42 @@ export default function App() {
                     verticalAlign: "top",
                   })}
                 >
-                  {renderMarksAndNo()}
-                  <table style={{ width: "100%", borderCollapse: "collapse", marginTop: hasContainers ? 10 : 0 }}>
-                    <tbody>
-                      <tr>
-                        <td
-                          style={td({
-                            fontWeight: 700,
-                            background: "#e9e9e9",
-                          })}
-                        >
-                          AMOUNT IN WORDS
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style={td({ minWidth: 0, height: 40 })}>
-                          {meta.amountInWords || autoWords}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </td>
-                <td
-                  style={td({
-                    width: "45%",
-                    border: "none",
-                    verticalAlign: "top",
-                  })}
-                >
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <tbody>
-                      <tr>
-                        <td style={td({ border: "none" })}>
-                          VAT @ {vatPercent}%
-                        </td>
-                        <td style={td({ textAlign: "right" })}>
-                          {vatAmount ? money(vatAmount) : "-"}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style={td({ border: "none", fontWeight: 700 })}>
-                          TOTAL INCL VAT
-                        </td>
-                        <td style={td({ textAlign: "right", fontWeight: 700 })}>
-                          {money(totalInclVat)}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style={td({ border: "none" })}>
-                          ADVANCE {advancePercent}%
-                        </td>
-                        <td style={td({ textAlign: "right" })}>
-                          {money(advanceAmt)}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td
-                          style={td({
-                            border: "none",
-                            fontWeight: 700,
-                            color: "#1a4fa0",
-                          })}
-                        >
-                          BALANCE TO PAY
-                        </td>
-                        <td
-                          style={td({
-                            textAlign: "right",
-                            fontWeight: 700,
-                            color: "#1a4fa0",
-                          })}
-                        >
-                          {money(balance)}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-
-          {/* Bank details + Signature */}
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              marginTop: 10,
-            }}
-          >
-            <tbody>
-              <tr>
-                <td
-                  style={td({
-                    width: "55%",
-                    border: "none",
-                    verticalAlign: "top",
-                  })}
-                >
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <tbody>
-                      <tr>
-                        <td
-                          style={td({
-                            fontWeight: 700,
-                            background: "#e9e9e9",
-                          })}
-                        >
-                          BANK DETAILS
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>
-                          ACC NAME : <b>{bank.accName}</b>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>BANK NAME : {bank.bankName}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>ACC NO : {bank.accNo}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>IBAN NO : {bank.iban}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>SWIFT NO : {bank.swift}</td>
-                      </tr>
-                      <tr>
-                        <td style={td()}>ADDRESS : {bank.address}</td>
-                      </tr>
-                    </tbody>
-                  </table>
+                  {!isPackingMode && (
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <tbody>
+                        <tr>
+                          <td
+                            style={td({
+                              fontWeight: 700,
+                              background: "#e9e9e9",
+                            })}
+                          >
+                            BANK DETAILS
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={td()}>
+                            ACC NAME : <b>{bank.accName}</b>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={td()}>BANK NAME : {bank.bankName}</td>
+                        </tr>
+                        <tr>
+                          <td style={td()}>ACC NO : {bank.accNo}</td>
+                        </tr>
+                        <tr>
+                          <td style={td()}>IBAN NO : {bank.iban}</td>
+                        </tr>
+                        <tr>
+                          <td style={td()}>SWIFT NO : {bank.swift}</td>
+                        </tr>
+                        <tr>
+                          <td style={td()}>ADDRESS : {bank.address}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  )}
                 </td>
                 <td
                   style={td({
