@@ -323,6 +323,7 @@ export default function App() {
 
   const [meta, setMeta] = useState({
     invoiceNo: "EX/AS/0098/26",
+    refNo: "",
     date: "2026-06-02",
     supplierPo: "ALS228989088",
     poDate: "2026-05-25",
