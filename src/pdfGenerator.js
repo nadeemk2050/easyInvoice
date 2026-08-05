@@ -463,16 +463,10 @@ export async function generateInvoicePdf(invoiceData) {
   });
 
   borderedBlock(ml, colLeft, buyerLines, { lineH: 4.0, fontSize: 7.5 });
-  if (!hasNotify && hasContainers) {
-    borderedBlock(ml, colLeft, containerLines, { lineH: 4.0, fontSize: 7.5 });
-  }
   const buyerBlockEnd = y;
 
   if (hasNotify) {
     borderedBlock(ml, colLeft, notifyLines, { lineH: 4.0, fontSize: 7.5 });
-    if (hasContainers) {
-      borderedBlock(ml, colLeft, containerLines, { lineH: 4.0, fontSize: 7.5 });
-    }
   }
   const notifyBlockEnd = y;
 
@@ -634,8 +628,14 @@ export async function generateInvoicePdf(invoiceData) {
 
   y = doc.lastAutoTable.finalY + 4;
 
-  // ============== AMOUNT IN WORDS + TOTALS ==============
+  // ============== MARKS & NO. + AMOUNT IN WORDS + TOTALS ==============
   const totalsStartY = y;
+
+  // --- MARKS & NO. block (left, above AMOUNT IN WORDS) ---
+  if (hasContainers) {
+    borderedBlock(ml, colLeft, containerLines, { lineH: 4.0, fontSize: 7.5 });
+    y += 2; // small gap before AMOUNT IN WORDS
+  }
 
   // --- AMOUNT IN WORDS (left, auto-filled from total) ---
   const autoWords = meta.amountInWords || numToWords(totalInclVat, meta.currency, meta.subunit);
@@ -650,6 +650,8 @@ export async function generateInvoicePdf(invoiceData) {
     doc.text(line, ml + 1, y + 7 + li * 4 + 7.5 * 0.35, { maxWidth: colLeft - 2 });
   });
 
+  const leftSideEnd = y + wordsH;
+
   // --- TOTALS (right) ---
   const totalsX = ml + colLeft;
   const totalsData = [
@@ -659,11 +661,11 @@ export async function generateInvoicePdf(invoiceData) {
     ["BALANCE TO PAY", money(balance)],
   ];
 
-  // Draw totals table manually
+  // Draw totals table manually starting at totalsStartY
   const totalsH = totalsData.length * 6 + 1;
-  doc.rect(totalsX, y, colRight, totalsH, "S");
+  doc.rect(totalsX, totalsStartY, colRight, totalsH, "S");
   totalsData.forEach((row, i) => {
-    const ry = y + i * 6;
+    const ry = totalsStartY + i * 6;
     const isLast = i === totalsData.length - 1;
     setFont(isLast ? 6.5 : 7.5, isLast ? "bold" : "normal");
 
@@ -680,7 +682,7 @@ export async function generateInvoicePdf(invoiceData) {
   });
   doc.setTextColor(0, 0, 0);
 
-  y = Math.max(y + wordsH, y + totalsH) + 4;
+  y = Math.max(leftSideEnd, totalsStartY + totalsH) + 4;
 
   // ============== BANK DETAILS + SIGNATURE ==============
   // --- BANK DETAILS (left) ---

@@ -2111,7 +2111,6 @@ export default function App() {
                       )}
                     </tbody>
                   </table>
-                  {!hasNotify && renderMarksAndNo()}
                   {/* Notify Party under Buyer — hidden when empty */}
                   {Object.values(notifyParty).some((v) => v && v.trim()) && (
                     <>
@@ -2158,7 +2157,6 @@ export default function App() {
                       )}
                     </tbody>
                   </table>
-                  {hasNotify && renderMarksAndNo()}
                     </>
                   )}
                 </td>
@@ -2378,7 +2376,8 @@ export default function App() {
                     verticalAlign: "top",
                   })}
                 >
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  {renderMarksAndNo()}
+                  <table style={{ width: "100%", borderCollapse: "collapse", marginTop: hasContainers ? 10 : 0 }}>
                     <tbody>
                       <tr>
                         <td
