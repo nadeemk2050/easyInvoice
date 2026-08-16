@@ -1,5 +1,6 @@
 import { useState, useRef, useMemo, useEffect } from "react";
-import { generateInvoicePdf, generatePackingListPdf, numToWords } from "./pdfGenerator";
+import { numToWords } from "./pdfGenerator";
+import { INVOICE_THEMES, PACKING_THEMES, getInvoiceTheme, getPackingTheme } from "./themes";
 import ManagementMenu from "./ManagementModals";
 import AuthPage from "./AuthPage";
 import { auth, onAuthStateChanged, db } from "./firebase";
@@ -63,7 +64,14 @@ function loadHistory() {
 
 function saveToHistory(invoice) {
   const list = loadHistory();
-  const dup = list.find((inv) => inv.meta?.invoiceNo === invoice.meta?.invoiceNo || (invoice.meta?.refNo && inv.meta?.refNo === invoice.meta?.refNo));
+  const newInvNo = (invoice.meta?.invoiceNo || "").trim();
+  const newRefNo = (invoice.meta?.refNo || "").trim();
+  const dup = list.find((inv) => {
+    const invNo = (inv.meta?.invoiceNo || "").trim();
+    const refNo = (inv.meta?.refNo || "").trim();
+    return (newInvNo && invNo && invNo.toLowerCase() === newInvNo.toLowerCase()) ||
+           (newRefNo && refNo && refNo.toLowerCase() === newRefNo.toLowerCase());
+  });
   if (dup) return false;
 
   // Strip large base64 image data to prevent QuotaExceededError in localStorage
@@ -88,7 +96,14 @@ function loadPackingHistory() {
 
 function saveToPackingHistory(packList) {
   const list = loadPackingHistory();
-  const dup = list.find((item) => item.meta?.invoiceNo === packList.meta?.invoiceNo || (packList.meta?.refNo && item.meta?.refNo === packList.meta?.refNo));
+  const newInvNo = (packList.meta?.invoiceNo || "").trim();
+  const newRefNo = (packList.meta?.refNo || "").trim();
+  const dup = list.find((item) => {
+    const invNo = (item.meta?.invoiceNo || "").trim();
+    const refNo = (item.meta?.refNo || "").trim();
+    return (newInvNo && invNo && invNo.toLowerCase() === newInvNo.toLowerCase()) ||
+           (newRefNo && refNo && refNo.toLowerCase() === newRefNo.toLowerCase());
+  });
   if (dup) return false;
 
   const { logo: _logo, signature: _signature, stamp: _stamp, ...cleanPackList } = packList;
@@ -408,6 +423,9 @@ export default function App() {
   const [packingHistory, setPackingHistory] = useState([]);
   const [activeOpts, setActiveOpts] = useState(null);
   const [toast, setToast] = useState("");
+  const [showPackingPrompt, setShowPackingPrompt] = useState(false);
+  const [invoiceThemeId, setInvoiceThemeId] = useState("classic");
+  const [packingThemeId, setPackingThemeId] = useState("classic");
   const [editingIndex, setEditingIndex] = useState(null);
   const [invoiceSearchQuery, setInvoiceSearchQuery] = useState("");
   const [showInvoiceSearch, setShowInvoiceSearch] = useState(false);
@@ -418,6 +436,18 @@ export default function App() {
     setToast(msg);
     setTimeout(() => setToast(""), 3000);
   };
+
+  const selectInvoiceTheme = (id) => {
+    setInvoiceThemeId(id);
+    try { localStorage.setItem(_uid + "_easyinvoice_invoiceTheme", id); } catch {}
+  };
+  const selectPackingTheme = (id) => {
+    setPackingThemeId(id);
+    try { localStorage.setItem(_uid + "_easyinvoice_packingTheme", id); } catch {}
+  };
+  const activeInvoiceTheme = getInvoiceTheme(invoiceThemeId);
+  const activePackingTheme = getPackingTheme(packingThemeId);
+  const ActiveInvoiceThemePreview = activeInvoiceTheme.preview;
 
   // ---------- helpers ----------
   const handleImage = (file, setter) => {
@@ -495,40 +525,119 @@ export default function App() {
 
   const blankRows = Math.max(0, 5 - items.length);
 
+  // ---------- Build invoice data (shared by save & download) ----------
+  const buildInvoiceData = () => ({
+    seller,
+    buyer,
+    notifyParty,
+    containers,
+    meta: {
+      ...meta,
+      amountInWords: meta.amountInWords || autoWords,
+    },
+    bank,
+    items,
+    vatPercent: parseFloat(vatPercent) || 0,
+    advancePercent: parseFloat(advancePercent) || 0,
+    logo,
+    signature,
+    stamp,
+    logoWidth,
+    logoHeight,
+    sigWidth,
+    sigHeight,
+    stampWidth,
+    stampHeight,
+    titleText,
+    titleFontSize,
+    titleAlign,
+    titleXOffset,
+    titleYOffset,
+  });
+
+  // ---------- Pre-fill packing list from current invoice ----------
+  const populatePackingFromInvoice = () => {
+    const containerList = Array.isArray(containers) ? containers : [];
+    const itemList = Array.isArray(items) ? items : [];
+    const descriptions = itemList.map((it) => it.description || "").filter(Boolean);
+    const firstPackingLine = (meta.packing || "").split("\n")[0].trim();
+
+    // Total quantity / weight from invoice items
+    const totalInvoiceWeight = itemList.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0);
+    const formatWeight = (val) => {
+      const num = parseFloat(val);
+      if (isNaN(num) || num <= 0) return "";
+      return num % 1 === 0 ? num.toString() : num.toFixed(3);
+    };
+
+    let rows = [];
+    if (containerList.length > 0) {
+      rows = containerList.map((c, idx) => {
+        let weightVal = "";
+        if (containerList.length === 1) {
+          // Single container gets the total invoice weight
+          weightVal = totalInvoiceWeight > 0 ? (totalInvoiceWeight % 1 === 0 ? totalInvoiceWeight.toString() : totalInvoiceWeight.toFixed(3)) : "";
+        } else if (itemList[idx] && parseFloat(itemList[idx].qty) > 0) {
+          weightVal = formatWeight(itemList[idx].qty);
+        } else if (totalInvoiceWeight > 0) {
+          const split = totalInvoiceWeight / containerList.length;
+          weightVal = split % 1 === 0 ? split.toString() : split.toFixed(3);
+        }
+
+        return {
+          containerSeal: [
+            c.containerNo ? `CONT : ${c.containerNo}` : "",
+            c.sealNo ? `SL : ${c.sealNo}` : "",
+          ].filter(Boolean).join("\n"),
+          typeOfPacking: firstPackingLine || "",
+          descriptionOfGoods: descriptions[idx] || (descriptions.length ? descriptions.join("\n") : ""),
+          grossWeight: weightVal,
+          tareWeight: weightVal ? "0" : "",
+          netWeight: weightVal,
+        };
+      });
+    } else {
+      rows = itemList.map((it) => {
+        const weightVal = formatWeight(it.qty);
+        return {
+          containerSeal: "",
+          typeOfPacking: firstPackingLine || "",
+          descriptionOfGoods: it.description || "",
+          grossWeight: weightVal,
+          tareWeight: weightVal ? "0" : "",
+          netWeight: weightVal,
+        };
+      });
+    }
+    if (rows.length === 0) {
+      const weightVal = totalInvoiceWeight > 0 ? (totalInvoiceWeight % 1 === 0 ? totalInvoiceWeight.toString() : totalInvoiceWeight.toFixed(3)) : "";
+      rows = [{
+        containerSeal: "",
+        typeOfPacking: firstPackingLine || "",
+        descriptionOfGoods: descriptions.join("\n") || "",
+        grossWeight: weightVal,
+        tareWeight: weightVal ? "0" : "",
+        netWeight: weightVal,
+      }];
+    }
+
+    setPackingItems(rows);
+    setTitleText("PACKING LIST");
+    setIsPackingMode(true);
+    setShowHistory(false);
+    setShowPackingHistory(false);
+    setEditingIndex(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    showToast("Packing list pre-filled with invoice details & weights!");
+  };
+
   // ---------- PDF download ----------
   const downloadPDF = async () => {
     setPdfBusy(true);
     setPdfError("");
     try {
-      const invoiceData = {
-        seller,
-        buyer,
-        notifyParty,
-        containers,
-        meta: {
-          ...meta,
-          amountInWords: meta.amountInWords || autoWords,
-        },
-        bank,
-        items,
-        vatPercent: parseFloat(vatPercent) || 0,
-        advancePercent: parseFloat(advancePercent) || 0,
-        logo,
-        signature,
-        stamp,
-        logoWidth,
-        logoHeight,
-        sigWidth,
-        sigHeight,
-        stampWidth,
-        stampHeight,
-        titleText,
-        titleFontSize,
-        titleAlign,
-        titleXOffset,
-        titleYOffset,
-      };
-      await generateInvoicePdf(invoiceData);
+      const invoiceData = buildInvoiceData();
+      await activeInvoiceTheme.pdf(invoiceData);
       // Save to history (reject duplicate invoice numbers)
       const saved = saveToHistory(invoiceData);
       setHistory(loadHistory());
@@ -537,6 +646,7 @@ export default function App() {
       } else {
         showToast("PDF downloaded (duplicate invoice no — not saved to history)");
       }
+      setShowPackingPrompt(true);
     } catch (err) {
       console.error("PDF generation failed", err);
       setPdfError(
@@ -587,7 +697,7 @@ export default function App() {
         titleXOffset,
         titleYOffset,
       };
-      await generatePackingListPdf(pdfData);
+      await activePackingTheme.pdf(pdfData);
       saveToPackingHistory(pdfData);
       setPackingHistory(loadPackingHistory());
       showToast("Packing List downloaded & saved!");
@@ -640,6 +750,7 @@ export default function App() {
     localStorage.setItem(_key("easyinvoice_history"), JSON.stringify(list));
     setHistory(list);
     showToast("Invoice updated!");
+    setShowPackingPrompt(true);
   };
 
   // ---------- Load from history ----------
@@ -689,7 +800,7 @@ export default function App() {
       titleXOffset,
       titleYOffset,
     };
-    await generateInvoicePdf(pdfData);
+    await activeInvoiceTheme.pdf(pdfData);
     showToast("PDF downloaded!");
   };
 
@@ -754,6 +865,11 @@ export default function App() {
         const savedTitleY = localStorage.getItem(_uid + "_easyinvoice_titleYOffset");
         if (savedTitleY) setTitleYOffset(parseFloat(savedTitleY));
 
+        const savedInvTheme = localStorage.getItem(_uid + "_easyinvoice_invoiceTheme");
+        if (savedInvTheme) setInvoiceThemeId(savedInvTheme);
+        const savedPackTheme = localStorage.getItem(_uid + "_easyinvoice_packingTheme");
+        if (savedPackTheme) setPackingThemeId(savedPackTheme);
+
         const savedContainers = localStorage.getItem(_uid + "_easyinvoice_containers");
         if (savedContainers) {
           try {
@@ -795,6 +911,9 @@ export default function App() {
       if (window.isSyncingFromFirestore) return;
 
       if (key.startsWith(uid + "_")) {
+        // Trigger React UI update for datalists & local lists immediately
+        setSyncCounter((prev) => prev + 1);
+
         const cleanKey = key.substring(uid.length + 1);
         let valToStore = value;
         try {
@@ -803,7 +922,9 @@ export default function App() {
 
         const docRef = doc(db, "user_data", uid);
         updateDoc(docRef, { [cleanKey]: valToStore }).catch(() => {
-          setDoc(docRef, { [cleanKey]: valToStore }, { merge: true }).catch(console.error);
+          setDoc(docRef, { [cleanKey]: valToStore }, { merge: true }).catch((err) => {
+            console.warn("Firestore sync warning:", err);
+          });
         });
       }
     };
@@ -814,9 +935,12 @@ export default function App() {
       if (window.isSyncingFromFirestore) return;
 
       if (key.startsWith(uid + "_")) {
+        setSyncCounter((prev) => prev + 1);
         const cleanKey = key.substring(uid.length + 1);
         const docRef = doc(db, "user_data", uid);
-        updateDoc(docRef, { [cleanKey]: deleteField() }).catch(console.error);
+        updateDoc(docRef, { [cleanKey]: deleteField() }).catch((err) => {
+          console.warn("Firestore delete warning:", err);
+        });
       }
     };
 
@@ -879,10 +1003,6 @@ export default function App() {
           setPackingHistory(data.easyinvoice_packinghistory);
         }
 
-        if (Array.isArray(data.easyinvoice_containers)) {
-          setContainers(data.easyinvoice_containers);
-        }
-
         if (data.easyinvoice_company) {
           const comp = data.easyinvoice_company;
           setSeller({
@@ -918,9 +1038,13 @@ export default function App() {
           }
         }
         if (Object.keys(initialData).length > 0) {
-          setDoc(docRef, initialData, { merge: true }).catch(console.error);
+          setDoc(docRef, initialData, { merge: true }).catch((err) => {
+            console.warn("Firestore initial save warning:", err);
+          });
         }
       }
+    }, (err) => {
+      console.warn("Firestore snapshot listener warning:", err);
     });
 
     return unsub;
@@ -1065,6 +1189,84 @@ export default function App() {
         </div>
       )}
 
+      {/* Create Packing List Prompt */}
+      {showPackingPrompt && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            zIndex: 4000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onClick={() => setShowPackingPrompt(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              padding: 26,
+              maxWidth: 430,
+              width: "90%",
+              textAlign: "center",
+              boxShadow: "0 8px 30px rgba(0,0,0,0.2)",
+            }}
+          >
+            <div style={{ fontSize: 36, marginBottom: 8 }}>📦</div>
+            <h3 style={{ margin: "0 0 8px", fontSize: 17, fontWeight: 800, color: "#1c1c1c" }}>
+              Create Packing List too?
+            </h3>
+            <p style={{ margin: "0 0 20px", fontSize: 13.5, color: "#555", lineHeight: 1.55 }}>
+              Want to insert this invoice's data to make the packing list also?
+              <br />
+              <span style={{ fontSize: 12, color: "#888" }}>
+                The packing list form will open pre-filled — you can fill the remaining details and save/download it.
+              </span>
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => {
+                  setShowPackingPrompt(false);
+                  populatePackingFromInvoice();
+                }}
+                style={{
+                  flex: 1,
+                  padding: "11px",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: "#fff",
+                  background: "#1a4fa0",
+                  border: "none",
+                  borderRadius: 7,
+                  cursor: "pointer",
+                }}
+              >
+                Yes, create packing list
+              </button>
+              <button
+                onClick={() => setShowPackingPrompt(false)}
+                style={{
+                  flex: 1,
+                  padding: "11px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#1c1c1c",
+                  background: "#fff",
+                  border: "1px solid #1c1c1c",
+                  borderRadius: 7,
+                  cursor: "pointer",
+                }}
+              >
+                No, just save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Invoices List Panel (Full Page View) */}
       {showHistory && (
         <div
@@ -1127,7 +1329,7 @@ export default function App() {
               >
                 🔍
               </button>
-              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} />
+              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} onDataChange={() => setSyncCounter((c) => c + 1)} />
               <button
                 onClick={() => { setShowHistory(false); setIsPackingMode(false); setEditingIndex(null); }}
                 style={{
@@ -1292,7 +1494,7 @@ export default function App() {
               >
                 🔍
               </button>
-              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} />
+              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} onDataChange={() => setSyncCounter((c) => c + 1)} />
               <button
                 onClick={() => {
                   setShowPackingHistory(false);
@@ -1407,7 +1609,7 @@ export default function App() {
                               titleXOffset,
                               titleYOffset,
                             };
-                            generatePackingListPdf(pdfData);
+                            activePackingTheme.pdf(pdfData);
                             showToast("PDF downloaded!");
                           }}
                             style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }}>⬇️ PDF</button>
@@ -1469,7 +1671,7 @@ export default function App() {
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} />
+              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} onDataChange={() => setSyncCounter((c) => c + 1)} />
               <button
                 onClick={() => {
                   if (isPackingMode) {
@@ -1493,6 +1695,76 @@ export default function App() {
               {/* Logout moved to menu */}
             </div>
           </div>
+
+          <Section title="Theme">
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#555", marginBottom: 6 }}>
+              Invoice Theme
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+              {INVOICE_THEMES.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => selectInvoiceTheme(t.id)}
+                  title={`Use "${t.name}" for the invoice preview & PDF`}
+                  style={{
+                    padding: "8px 10px",
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    textAlign: "left",
+                    border: invoiceThemeId === t.id ? "2px solid #1a4fa0" : "1px solid #d4d4d4",
+                    borderRadius: 8,
+                    background: invoiceThemeId === t.id ? "#eef4fc" : "#fff",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <span style={{ display: "flex", borderRadius: 4, overflow: "hidden", border: "1px solid #ddd", flexShrink: 0 }}>
+                    <span style={{ width: 14, height: 18, background: t.swatch[0] }} />
+                    <span style={{ width: 14, height: 18, background: t.swatch[1] }} />
+                  </span>
+                  <span style={{ lineHeight: 1.25 }}>{t.name}</span>
+                  {invoiceThemeId === t.id && <span style={{ marginLeft: "auto", color: "#1a4fa0", fontWeight: 800 }}>✓</span>}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#555", marginBottom: 6 }}>
+              Packing List Theme
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {PACKING_THEMES.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => selectPackingTheme(t.id)}
+                  title={`Use "${t.name}" for the packing list preview & PDF`}
+                  style={{
+                    padding: "8px 10px",
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    textAlign: "left",
+                    border: packingThemeId === t.id ? "2px solid #1a4fa0" : "1px solid #d4d4d4",
+                    borderRadius: 8,
+                    background: packingThemeId === t.id ? "#eef4fc" : "#fff",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <span style={{ display: "flex", borderRadius: 4, overflow: "hidden", border: "1px solid #ddd", flexShrink: 0 }}>
+                    <span style={{ width: 14, height: 18, background: t.swatch[0] }} />
+                    <span style={{ width: 14, height: 18, background: t.swatch[1] }} />
+                  </span>
+                  <span style={{ lineHeight: 1.25 }}>{t.name}</span>
+                  {packingThemeId === t.id && <span style={{ marginLeft: "auto", color: "#1a4fa0", fontWeight: 800 }}>✓</span>}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 10.5, color: "#888", marginTop: 10, lineHeight: 1.5 }}>
+              The preview &amp; downloaded PDF update instantly. <b>Classic</b> remains the default theme — nothing about it has changed.
+            </div>
+          </Section>
 
           <Section title="Header">
             {/* Password Unlock Box for Dimensions */}
@@ -2009,8 +2281,13 @@ export default function App() {
 
           {!isPackingMode && (
             <Section title="Marks and Numbers">
+              {containers.length === 0 && (
+                <div style={{ fontSize: 11, color: "#888", marginBottom: 8, fontStyle: "italic" }}>
+                  No containers added. Leave empty if no container marks are required.
+                </div>
+              )}
               {containers.map((c, i) => (
-                <div key={i} style={{ border: "1px solid #e8e8e8", borderRadius: 6, padding: 8, marginBottom: 8 }}>
+                <div key={i} style={{ border: "1px solid #e8e8e8", borderRadius: 6, padding: 8, marginBottom: 8, background: "#fafafa" }}>
                   <div style={{ display: "flex", gap: 6 }}>
                     <div style={{ flex: 1 }}>
                       {field(`Container No (${i + 1})`, c.containerNo || "", (v) => {
@@ -2035,22 +2312,36 @@ export default function App() {
                       setContainers(next);
                       localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify(next));
                     }}
-                    style={{ fontSize: 11, color: "#b3261e", background: "none", border: "none", padding: 0, marginTop: 2 }}
+                    style={{ fontSize: 11, color: "#b3261e", background: "none", border: "none", padding: "2px 0", marginTop: 2, cursor: "pointer", fontWeight: 600 }}
                   >
-                    Remove Container
+                    ✕ Remove Container
                   </button>
                 </div>
               ))}
-              <button
-                onClick={() => {
-                  const next = [...containers, { containerNo: "", sealNo: "" }];
-                  setContainers(next);
-                  localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify(next));
-                }}
-                style={{ width: "100%", padding: "8px", fontSize: 12, border: "1px dashed #999", borderRadius: 6, background: "#fafafa" }}
-              >
-                + Add More Containers
-              </button>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => {
+                    const next = [...containers, { containerNo: "", sealNo: "" }];
+                    setContainers(next);
+                    localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify(next));
+                  }}
+                  style={{ flex: 1, padding: "8px", fontSize: 12, border: "1px dashed #999", borderRadius: 6, background: "#fff", cursor: "pointer", fontWeight: 600 }}
+                >
+                  + Add Container
+                </button>
+                {containers.length > 0 && (
+                  <button
+                    onClick={() => {
+                      setContainers([]);
+                      localStorage.setItem(_uid + "_easyinvoice_containers", JSON.stringify([]));
+                    }}
+                    style={{ padding: "8px 12px", fontSize: 12, border: "1px solid #e0e0e0", borderRadius: 6, background: "#fff", color: "#b3261e", cursor: "pointer" }}
+                    title="Remove all containers"
+                  >
+                    Clear All
+                  </button>
+                )}
+              </div>
             </Section>
           )}
 
@@ -2234,6 +2525,7 @@ export default function App() {
                   const saved = saveToHistory(data);
                   setHistory(loadHistory());
                   showToast(saved ? "Saved as new Invoice!" : "Duplicate invoice/ref no — not saved");
+                  setShowPackingPrompt(true);
                 }}
                 style={{ flex: 1, padding: "10px", fontSize: 12, fontWeight: 600, color: "#1c1c1c", background: "#fff", border: "1px solid #1c1c1c", borderRadius: 7, cursor: "pointer" }}
               >
@@ -2247,6 +2539,7 @@ export default function App() {
                 const saved = saveToHistory(data);
                 setHistory(loadHistory());
                 showToast(saved ? "Invoice saved!" : "Duplicate invoice/ref no — not saved");
+                setShowPackingPrompt(true);
               }}
               style={{ width: "100%", padding: "10px", fontSize: 12, fontWeight: 600, color: "#1c1c1c", background: "#fff", border: "1px solid #1c1c1c", borderRadius: 7, marginTop: 4, cursor: "pointer" }}>
               💾 Save {isPackingMode ? "Packing List" : "Invoice"}
@@ -2315,6 +2608,34 @@ export default function App() {
             containerType: "inline-size",
           }}
         >
+          {!isPackingMode && invoiceThemeId !== "classic" ? (
+            <ActiveInvoiceThemePreview
+              seller={seller}
+              buyer={buyer}
+              notifyParty={notifyParty}
+              containers={containers}
+              meta={meta}
+              items={items}
+              bank={bank}
+              vatPercent={vatPercent}
+              advancePercent={advancePercent}
+              logo={logo}
+              signature={signature}
+              stamp={stamp}
+              logoWidth={logoWidth}
+              logoHeight={logoHeight}
+              sigWidth={sigWidth}
+              sigHeight={sigHeight}
+              stampWidth={stampWidth}
+              stampHeight={stampHeight}
+              titleText={titleText}
+              titleFontSize={titleFontSize}
+              titleAlign={titleAlign}
+              titleXOffset={titleXOffset}
+              titleYOffset={titleYOffset}
+            />
+          ) : (
+            <>
           {/* Top: logo + title */}
           <div
             style={{
@@ -3055,6 +3376,8 @@ export default function App() {
               </tr>
             </tbody>
           </table>
+            </>
+          )}
         </div>
       </div>
       </div>

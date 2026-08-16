@@ -614,11 +614,10 @@ function TeamMembersModal({ onClose }) {
   );
 }
 
-/* ============ Dropdown Menu ============ */
-function pfx(key) { return (typeof _mgmtUid !== "undefined" ? _mgmtUid + "_" : "") + key; }
+function pfx(key) { return (_mgmtUid ? _mgmtUid + "_" : "") + key; }
 let _mgmtUid = "";
 
-export default function ManagementMenu({ uid, onCompany, onCustomer, sellers, setSellers, setBuyer, onPackingListClick, onInvoiceListClick }) {
+export default function ManagementMenu({ uid, onCompany, onCustomer, sellers, setSellers, setBuyer, onPackingListClick, onInvoiceListClick, onDataChange }) {
   _mgmtUid = uid || "";
   const [open, setOpen] = useState(false);
   const [modal, setModal] = useState(null); // 'company' | 'customers' | 'other' | 'settings' | 'team'
@@ -744,11 +743,11 @@ export default function ManagementMenu({ uid, onCompany, onCustomer, sellers, se
       </div>
 
       {/* Modals */}
-      {modal === "company" && <CompanyModal onClose={() => setModal(null)} onApply={handleCompanyApply} />}
-      {modal === "customers" && <CustomersModal onClose={() => setModal(null)} onSelect={handleCustomerSelect} />}
-      {modal === "other" && <OtherDetailsModal onClose={() => setModal(null)} />}
-      {modal === "settings" && <SettingsModal onClose={() => setModal(null)} />}
-      {modal === "team" && <TeamMembersModal onClose={() => setModal(null)} />}
+      {modal === "company" && <CompanyModal onClose={() => { setModal(null); onDataChange && onDataChange(); }} onApply={handleCompanyApply} />}
+      {modal === "customers" && <CustomersModal onClose={() => { setModal(null); onDataChange && onDataChange(); }} onSelect={handleCustomerSelect} />}
+      {modal === "other" && <OtherDetailsModal onClose={() => { setModal(null); onDataChange && onDataChange(); }} />}
+      {modal === "settings" && <SettingsModal onClose={() => { setModal(null); onDataChange && onDataChange(); }} />}
+      {modal === "team" && <TeamMembersModal onClose={() => { setModal(null); onDataChange && onDataChange(); }} />}
       {modal === "profile" && <ProfileModal onClose={() => setModal(null)} />}
     </>
   );
