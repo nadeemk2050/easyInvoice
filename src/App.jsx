@@ -442,6 +442,17 @@ export default function App() {
   const [showInvoiceSearch, setShowInvoiceSearch] = useState(false);
   const [packingSearchQuery, setPackingSearchQuery] = useState("");
   const [showPackingSearch, setShowPackingSearch] = useState(false);
+  const [quickEntryMode, setQuickEntryMode] = useState(false);
+  const [quickInvoiceChecked, setQuickInvoiceChecked] = useState(true);
+  const [quickPackingChecked, setQuickPackingChecked] = useState(false);
+  const [quickDate, setQuickDate] = useState("");
+  const [quickReference, setQuickReference] = useState("");
+  const [quickTransport, setQuickTransport] = useState("");
+  const [quickPacking, setQuickPacking] = useState("");
+  const [quickBuyer, setQuickBuyer] = useState({ name: "", addr1: "", addr2: "", gst: "", pan: "", contact: "", email: "" });
+  const [quickRows, setQuickRows] = useState([{ description: "", qty: "", rate: "", per: "MTS" }]);
+  const [quickVat, setQuickVat] = useState("");
+  const [quickBankIndex, setQuickBankIndex] = useState("");
 
   const showToast = (msg) => {
     setToast(msg);
@@ -461,6 +472,165 @@ export default function App() {
   const ActiveInvoiceThemePreview = activeInvoiceTheme.preview;
 
   // ---------- helpers ----------
+  const resetForNewDocument = (packingMode) => {
+    setBuyer({ name: "", addr1: "", addr2: "", gst: "", pan: "", contact: "", email: "" });
+    setNotifyParty({ name: "", addr1: "", addr2: "", email: "", contact: "" });
+    setContainers([]);
+    setMeta({
+      invoiceNo: "",
+      refNo: "",
+      date: "",
+      supplierPo: "",
+      poDate: "",
+      transportType: "",
+      driverVessel: "",
+      loadingAt: "",
+      finalDestination: "",
+      packing: "",
+      paymentTerms: "",
+      currency: "",
+      subunit: "",
+      amountInWords: "",
+      originOfGoods: "",
+    });
+    setBank({ accName: "", bankName: "", accNo: "", iban: "", swift: "", address: "" });
+    setVatPercent("");
+    setAdvancePercent("");
+    setItems([{ description: "", qty: "", rate: "", per: "MTS" }]);
+    setPackingItems([{ containerSeal: "", typeOfPacking: "", descriptionOfGoods: "", grossWeight: "", tareWeight: "", netWeight: "" }]);
+    setTitleText(packingMode ? "PACKING LIST" : "COMMERCIAL INVOICE");
+    setEditingIndex(null);
+  };
+
+  const openQuickEntry = () => {
+    resetForNewDocument(false);
+    const savedInvoiceTheme = localStorage.getItem(_uid + "_easyinvoice_invoiceTheme");
+    const savedPackingTheme = localStorage.getItem(_uid + "_easyinvoice_packingTheme");
+    if (savedInvoiceTheme) setInvoiceThemeId(savedInvoiceTheme);
+    if (savedPackingTheme) setPackingThemeId(savedPackingTheme);
+    setQuickInvoiceChecked(true);
+    setQuickPackingChecked(false);
+    setQuickDate(new Date().toISOString().slice(0, 10));
+    setQuickReference("");
+    setQuickTransport("");
+    setQuickPacking("");
+    setQuickBuyer({ name: "", addr1: "", addr2: "", gst: "", pan: "", contact: "", email: "" });
+    setQuickRows([{ description: "", qty: "", rate: "", per: "MTS" }]);
+    setQuickVat("");
+    setQuickBankIndex("");
+    setQuickEntryMode(true);
+    setShowHistory(false);
+    setShowPackingHistory(false);
+    setIsPackingMode(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const updateQuickRow = (index, key, value) => {
+    setQuickRows((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, [key]: value } : row));
+  };
+
+  const buildQuickDocuments = () => {
+    const selectedBank = quickBankIndex === "" ? {} : (dlBanks[quickBankIndex] || {});
+    const quickMeta = {
+      ...meta,
+      invoiceNo: quickReference,
+      refNo: "",
+      date: quickDate,
+      supplierPo: "",
+      poDate: "",
+      transportType: quickTransport,
+      driverVessel: "",
+      loadingAt: "",
+      finalDestination: "",
+      packing: quickPacking,
+      paymentTerms: "",
+      amountInWords: "",
+      originOfGoods: "",
+    };
+    const invoice = {
+      seller,
+      buyer: quickBuyer,
+      notifyParty: { name: "", addr1: "", addr2: "", email: "", contact: "" },
+      containers: [],
+      meta: quickMeta,
+      bank: {
+        accName: selectedBank.accName || "",
+        bankName: selectedBank.bankName || "",
+        accNo: selectedBank.accNo || "",
+        iban: selectedBank.iban || "",
+        swift: selectedBank.swift || "",
+        address: selectedBank.address || "",
+      },
+      items: quickRows,
+      vatPercent: parseFloat(quickVat) || 0,
+      advancePercent: 0,
+      logo, signature, stamp,
+      logoWidth, logoHeight, sigWidth, sigHeight, stampWidth, stampHeight,
+      titleText: "COMMERCIAL INVOICE", titleFontSize, titleAlign, titleXOffset, titleYOffset,
+    };
+    const packing = {
+      seller,
+      buyer: quickBuyer,
+      notifyParty: invoice.notifyParty,
+      meta: quickMeta,
+      packingItems: quickRows.map((row) => ({
+        containerSeal: "",
+        typeOfPacking: quickPacking,
+        descriptionOfGoods: row.description || "",
+        grossWeight: row.qty || "",
+        tareWeight: "",
+        netWeight: row.qty || "",
+      })),
+      logo, signature, stamp,
+      logoWidth, logoHeight, sigWidth, sigHeight, stampWidth, stampHeight,
+      titleText: "PACKING LIST", titleFontSize, titleAlign, titleXOffset, titleYOffset,
+    };
+    return { invoice, packing };
+  };
+
+  const mapQuickDocumentToEditor = (documents) => {
+    const document = quickInvoiceChecked ? documents.invoice : documents.packing;
+    setBuyer(document.buyer);
+    setNotifyParty(document.notifyParty);
+    setContainers(document.containers || []);
+    setMeta(document.meta);
+    setBank(document.bank || {});
+    setItems(document.items || []);
+    setPackingItems(document.packingItems || []);
+    setVatPercent(document.vatPercent || 0);
+    setAdvancePercent(0);
+    setTitleText(document.titleText);
+    setIsPackingMode(!quickInvoiceChecked && quickPackingChecked);
+  };
+
+  const runQuickAction = async (action) => {
+    if (!quickInvoiceChecked && !quickPackingChecked) {
+      showToast("Choose Invoice, Packing List, or both");
+      return;
+    }
+    setPdfBusy(action !== "save");
+    setPdfError("");
+    try {
+      const documents = buildQuickDocuments();
+      mapQuickDocumentToEditor(documents);
+      if (quickInvoiceChecked) {
+        if (action !== "save") await activeInvoiceTheme.pdf(documents.invoice);
+        if (action !== "download") saveToHistory(documents.invoice);
+      }
+      if (quickPackingChecked) {
+        if (action !== "save") await activePackingTheme.pdf(documents.packing);
+        if (action !== "download") saveToPackingHistory(documents.packing);
+      }
+      setHistory(loadHistory());
+      setPackingHistory(loadPackingHistory());
+      showToast(action === "save" ? "Quick entry saved!" : action === "download" ? "Quick entry downloaded!" : "Quick entry saved & downloaded!");
+    } catch (err) {
+      console.error("Quick entry action failed", err);
+      setPdfError("Quick entry action failed. Please try again.");
+    }
+    setPdfBusy(false);
+  };
+
   const handleImage = (file, setter) => {
     if (!file) return;
     const reader = new FileReader();
@@ -474,7 +644,7 @@ export default function App() {
     setItems(next);
   };
   const addItem = () =>
-    setItems([...items, { description: "", qty: "", rate: "", per: "" }]);
+    setItems([...items, { description: "", qty: "", rate: "", per: "MTS" }]);
   const removeItem = (i) => setItems(items.filter((_, idx) => idx !== i));
 
   const updatePackingItem = (i, key, val) => {
@@ -1126,6 +1296,7 @@ export default function App() {
       <datalist id="dl-itemNames">{dlItemNames.map((c, i) => <option key={i} value={c} />)}</datalist>
       <datalist id="dl-qtyUnits">{dlQtyUnits.map((c, i) => <option key={i} value={c} />)}</datalist>
       <datalist id="dl-customers">{dlCustomers.map((c, i) => <option key={i} value={c.name} />)}</datalist>
+      <datalist id="dl-transport"><option value="SEA" /><option value="AIR" /><option value="ROAD" /><option value="COURIER" /></datalist>
 
       <style>{`
         .app-layout {
@@ -1158,6 +1329,27 @@ export default function App() {
         }
         input:focus, textarea:focus { border-color: #1c1c1c !important; }
         button { font-family: inherit; cursor: pointer; }
+        .quick-entry { max-width: 760px; margin: 0 auto; padding: 24px 16px 40px; }
+        .quick-entry-page { min-height: 100vh; box-sizing: border-box; background: #f4f4f2; }
+        .quick-entry-card { background: #fff; border: 1px solid #e4e4e0; border-radius: 14px; padding: 22px; box-shadow: 0 8px 24px rgba(28,28,28,0.06); }
+        .quick-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+        .quick-field { min-width: 0; }
+        .quick-field label { display: block; margin-bottom: 5px; font-size: 12px; font-weight: 700; color: #555; }
+        .quick-field input, .quick-field select, .quick-field textarea { width: 100%; box-sizing: border-box; min-height: 44px; padding: 10px 11px; border: 1px solid #d4d4d4; border-radius: 7px; font: inherit; font-size: 14px; background: #fff; }
+        .quick-field textarea { min-height: 82px; resize: vertical; }
+        .quick-row { display: grid; grid-template-columns: minmax(0, 2fr) 72px 82px 68px minmax(100px, 1fr) 30px; gap: 8px; align-items: end; margin-top: 10px; }
+        .quick-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; grid-column: 2 / -1; }
+        .quick-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+        @media (max-width: 560px) {
+          .quick-entry { padding: 12px 10px 28px; }
+          .quick-entry-card { padding: 15px; border-radius: 10px; }
+          .quick-grid, .quick-actions { grid-template-columns: 1fr; }
+          .quick-summary { grid-column: 1 / -1; }
+          .quick-row { grid-template-columns: 1fr 1fr; }
+          .quick-row .quick-description { grid-column: 1 / -1; }
+          .quick-row .quick-amount { grid-column: 1 / 2; }
+          .quick-row button { min-height: 44px; }
+        }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
 
@@ -1261,8 +1453,74 @@ export default function App() {
         </div>
       )}
 
+      {quickEntryMode && (
+        <div className="quick-entry-page no-print">
+          <div className="quick-entry no-print">
+          <div className="quick-entry-card">
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 18 }}>
+              <div>
+                <div style={{ fontSize: 24, fontWeight: 900, color: "#1c1c1c" }}>Quick Entry</div>
+                <div style={{ marginTop: 4, color: "#777", fontSize: 13 }}>Urgent document entry</div>
+              </div>
+              <button onClick={() => { setQuickEntryMode(false); setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} style={{ minHeight: 40, padding: "8px 12px", border: "1px solid #d4d4d4", borderRadius: 7, background: "#fff", fontWeight: 700 }}>Close</button>
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 18 }}>
+              {[{ label: "Invoice", value: quickInvoiceChecked, set: setQuickInvoiceChecked }, { label: "Packing List", value: quickPackingChecked, set: setQuickPackingChecked }].map((type) => (
+                <label key={type.label} style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 44, padding: "0 13px", border: `1px solid ${type.value ? "#1a4fa0" : "#d4d4d4"}`, borderRadius: 7, background: type.value ? "#eef4ff" : "#fff", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                  <input type="checkbox" checked={type.value} onChange={(e) => type.set(e.target.checked)} style={{ width: 18, height: 18, accentColor: "#1a4fa0" }} />
+                  {type.label}
+                </label>
+              ))}
+              <span style={{ alignSelf: "center", color: "#777", fontSize: 12 }}>Select one or both</span>
+            </div>
+
+            <div className="quick-grid">
+              <div className="quick-field"><label>{quickPackingChecked && !quickInvoiceChecked ? "Packing Reference Number" : "Invoice Number"}</label><input value={quickReference} onChange={(e) => setQuickReference(e.target.value)} placeholder="Enter reference number" /></div>
+              <div className="quick-field"><label>Date</label><input type="date" value={quickDate} onChange={(e) => setQuickDate(e.target.value)} /></div>
+              <div className="quick-field"><label>Transport Type</label><input list="dl-transport" value={quickTransport} onChange={(e) => setQuickTransport(e.target.value)} placeholder="e.g. SEA" /></div>
+              <div className="quick-field"><label>Bank Account</label><select value={quickBankIndex} onChange={(e) => setQuickBankIndex(e.target.value)}><option value="">Choose saved bank</option>{dlBanks.map((bankOption, index) => <option key={index} value={index}>{bankOption.bankName} ({bankOption.accNo})</option>)}</select></div>
+              <div className="quick-field" style={{ gridColumn: "1 / -1" }}><label>Packing Details</label><textarea value={quickPacking} onChange={(e) => setQuickPacking(e.target.value)} placeholder="Enter packing details" /></div>
+              <div className="quick-field" style={{ gridColumn: "1 / -1" }}><label>Consignee / Buyer</label><select value={quickBuyer.name} onChange={(e) => { const selected = dlCustomers.find((customer) => customer.name === e.target.value); setQuickBuyer(selected ? { name: selected.name || "", addr1: selected.addr1 || "", addr2: selected.addr2 || "", gst: selected.gst || "", pan: selected.pan || "", contact: selected.contact || "", email: selected.email || "" } : { ...quickBuyer, name: e.target.value }); }}><option value="">Choose saved customer</option>{dlCustomers.map((customer, index) => <option key={index} value={customer.name}>{customer.name}</option>)}</select></div>
+            </div>
+
+            <div style={{ marginTop: 20, borderTop: "1px solid #ecece8", paddingTop: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}><strong style={{ fontSize: 15 }}>Material Lines</strong><span style={{ fontSize: 12, color: "#777" }}>Amount = Quantity x Rate</span></div>
+              {quickRows.map((row, index) => {
+                const amount = (parseFloat(row.qty) || 0) * (parseFloat(row.rate) || 0);
+                return <div className="quick-row" key={index}>
+                  <div className="quick-field quick-description"><label>Description</label><select value={row.description} onChange={(e) => updateQuickRow(index, "description", e.target.value)}><option value="">Choose saved item</option>{dlItemNames.map((itemName, itemIndex) => <option key={itemIndex} value={typeof itemName === "string" ? itemName : itemName.name}>{typeof itemName === "string" ? itemName : itemName.name}</option>)}</select></div>
+                  <div className="quick-field"><label>Qty</label><input inputMode="decimal" value={row.qty} onChange={(e) => updateQuickRow(index, "qty", e.target.value)} placeholder="0" /></div>
+                  <div className="quick-field"><label>Rate</label><input inputMode="decimal" value={row.rate} onChange={(e) => updateQuickRow(index, "rate", e.target.value)} placeholder="0" /></div>
+                  <div className="quick-field"><label>Per</label><input value={row.per} onChange={(e) => updateQuickRow(index, "per", e.target.value)} placeholder="MTS" /></div>
+                  <div className="quick-field quick-amount"><label>Amount</label><input value={amount ? amount.toFixed(2) : ""} readOnly /></div>
+                  <button aria-label="Remove material line" title="Remove material line" disabled={quickRows.length === 1} onClick={() => setQuickRows((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} style={{ width: 30, height: 30, padding: 0, border: "none", borderRadius: "50%", background: quickRows.length === 1 ? "#f2f2f2" : "#fff1f1", color: quickRows.length === 1 ? "#aaa" : "#b3261e", fontSize: 18, lineHeight: 1, alignSelf: "center" }}>−</button>
+                </div>;
+              })}
+              <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
+                <button aria-label="Add material line" title="Add material line" onClick={() => setQuickRows((rows) => [...rows, { description: "", qty: "", rate: "", per: "MTS" }])} style={{ width: 38, height: 38, padding: 0, border: "1px solid #1a4fa0", borderRadius: "50%", background: "#f5f8ff", color: "#1a4fa0", fontWeight: 800, fontSize: 24, lineHeight: 1 }}>+</button>
+              </div>
+            </div>
+
+            <div className="quick-grid" style={{ marginTop: 16, alignItems: "end" }}>
+              <div className="quick-field" style={{ maxWidth: 92 }}><label>VAT %</label><input inputMode="decimal" value={quickVat} onChange={(e) => setQuickVat(e.target.value)} placeholder="0" /></div>
+              <div className="quick-summary">
+                <div style={{ padding: "10px 12px", borderRadius: 7, background: "#f5f8ff", border: "1px solid #dce7ff" }}><div style={{ fontSize: 11, color: "#667085", fontWeight: 700 }}>TOTAL QUANTITY</div><div style={{ marginTop: 3, fontSize: 17, fontWeight: 800, color: "#1a4fa0" }}>{quickRows.reduce((total, row) => total + (parseFloat(row.qty) || 0), 0).toFixed(3)}</div></div>
+                <div style={{ padding: "10px 12px", borderRadius: 7, background: "#f5f8ff", border: "1px solid #dce7ff" }}><div style={{ fontSize: 11, color: "#667085", fontWeight: 700 }}>TOTAL AMOUNT</div><div style={{ marginTop: 3, fontSize: 17, fontWeight: 800, color: "#1a4fa0" }}>{quickRows.reduce((total, row) => total + ((parseFloat(row.qty) || 0) * (parseFloat(row.rate) || 0)), 0).toFixed(2)}</div></div>
+              </div>
+            </div>
+            <div className="quick-actions" style={{ marginTop: 22 }}>
+              <button onClick={() => runQuickAction("save")} style={{ minHeight: 48, border: "1px solid #1c1c1c", borderRadius: 7, background: "#fff", fontWeight: 800 }}>1. Save Only</button>
+              <button onClick={() => runQuickAction("download")} disabled={pdfBusy} style={{ minHeight: 48, border: "none", borderRadius: 7, background: pdfBusy ? "#888" : "#1c1c1c", color: "#fff", fontWeight: 800 }}>2. Download Only</button>
+              <button onClick={() => runQuickAction("both")} disabled={pdfBusy} style={{ minHeight: 48, border: "none", borderRadius: 7, background: pdfBusy ? "#888" : "#1a4fa0", color: "#fff", fontWeight: 800 }}>3. Save and Download</button>
+            </div>
+          </div>
+        </div>
+        </div>
+      )}
+
       {/* Invoices List Panel (Full Page View) */}
-      {showHistory && (
+      {!quickEntryMode && showHistory && (
         <div
           style={{
             maxWidth: 1200,
@@ -1324,8 +1582,14 @@ export default function App() {
                 🔍
               </button>
               <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} onDataChange={() => setSyncCounter((c) => c + 1)} />
+              <button onClick={openQuickEntry} style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, border: "1px solid #1a4fa0", borderRadius: 8, background: "#eef4ff", color: "#1a4fa0", cursor: "pointer" }}>⚡ Quick Entry</button>
               <button
-                onClick={() => { setShowHistory(false); setIsPackingMode(false); setEditingIndex(null); }}
+                onClick={() => {
+                  resetForNewDocument(false);
+                  setShowHistory(false);
+                  setShowPackingHistory(false);
+                  setIsPackingMode(false);
+                }}
                 style={{
                   padding: "10px 20px",
                   fontSize: 13,
@@ -1427,7 +1691,7 @@ export default function App() {
       )}
 
       {/* Packing Lists Details Panel */}
-      {showPackingHistory && (
+      {!quickEntryMode && showPackingHistory && (
         <div
           style={{
             maxWidth: 1200,
@@ -1489,13 +1753,13 @@ export default function App() {
                 🔍
               </button>
               <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} onDataChange={() => setSyncCounter((c) => c + 1)} />
+              <button onClick={openQuickEntry} style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, border: "1px solid #1a4fa0", borderRadius: 8, background: "#eef4ff", color: "#1a4fa0", cursor: "pointer" }}>⚡ Quick Entry</button>
               <button
                 onClick={() => {
+                  resetForNewDocument(true);
                   setShowPackingHistory(false);
+                  setShowHistory(false);
                   setIsPackingMode(true);
-                  setTitleText("PACKING LIST");
-                  // Reset forms to empty packing list
-                  setPackingItems([{ containerSeal: "", typeOfPacking: "", descriptionOfGoods: "", grossWeight: "", tareWeight: "", netWeight: "" }]);
                 }}
                 style={{
                   padding: "10px 20px",
@@ -1630,7 +1894,7 @@ export default function App() {
         </div>
       )}
 
-      {!showHistory && !showPackingHistory && (
+      {!quickEntryMode && !showHistory && !showPackingHistory && (
         <div
           className="app-layout"
           style={{
