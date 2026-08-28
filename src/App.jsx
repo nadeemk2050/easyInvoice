@@ -23,16 +23,27 @@ const BORDER = "1.5px solid #000";
 
 const td = (extra) => ({
   border: BORDER,
-  padding: "3px 6px",
+  padding: "5px 6px",
   fontSize: 10.5,
-  verticalAlign: "top",
+  verticalAlign: "middle",
   borderRadius: 2,
   ...extra,
 });
 
+// Join multi-line values into a single continuous line (e.g. "Area\nU.A.E" -> "Area, U.A.E")
+const inlineJoin = (s) => (s || "").replace(/\s*\n\s*/g, ", ");
+
+// Borderless cell for SELLER / BUYER / NOTIFY PARTY sections (heading highlight only)
+const tdn = (extra) => td({ border: "none", ...extra });
+
 // These are re-initialized inside App() with the user UID
 let _uid = "anon";
 function _key(raw) { return _uid + "_" + raw; }
+
+// Tracks localStorage keys whose local writes have NOT yet been confirmed by
+// Firestore. A stale snapshot must never overwrite these keys, otherwise new
+// local data (e.g. a just-added customer) gets silently "auto-removed".
+const localDirty = {};
 
 function loadHistory() {
   try {
@@ -915,17 +926,25 @@ export default function App() {
         setSyncCounter((prev) => prev + 1);
 
         const cleanKey = key.substring(uid.length + 1);
+        // Mark as pending so a stale snapshot can't overwrite this newer local value
+        localDirty[key] = true;
+
         let valToStore = value;
         try {
           valToStore = JSON.parse(value);
         } catch {}
 
         const docRef = doc(db, "user_data", uid);
-        updateDoc(docRef, { [cleanKey]: valToStore }).catch(() => {
-          setDoc(docRef, { [cleanKey]: valToStore }, { merge: true }).catch((err) => {
+        setDoc(docRef, { [cleanKey]: valToStore }, { merge: true })
+          .then(() => {
+            // Confirmed synced — snapshots may now apply for this key
+            localDirty[key] = false;
+          })
+          .catch((err) => {
             console.warn("Firestore sync warning:", err);
+            // Keep localDirty = true: the server copy is stale for this key,
+            // so snapshots must not overwrite the newer local value.
           });
-        });
       }
     };
 
@@ -937,10 +956,16 @@ export default function App() {
       if (key.startsWith(uid + "_")) {
         setSyncCounter((prev) => prev + 1);
         const cleanKey = key.substring(uid.length + 1);
+        // Mark as pending so a stale snapshot can't resurrect the deleted value
+        localDirty[key] = true;
         const docRef = doc(db, "user_data", uid);
-        updateDoc(docRef, { [cleanKey]: deleteField() }).catch((err) => {
-          console.warn("Firestore delete warning:", err);
-        });
+        updateDoc(docRef, { [cleanKey]: deleteField() })
+          .then(() => {
+            localDirty[key] = false;
+          })
+          .catch((err) => {
+            console.warn("Firestore delete warning:", err);
+          });
       }
     };
 
@@ -968,6 +993,10 @@ export default function App() {
           const rawKey = uid + "_" + key;
           const val = data[key];
           const strVal = typeof val === "object" ? JSON.stringify(val) : String(val);
+
+          // Never overwrite a key that has a newer local write still pending
+          // sync (or whose last sync failed) — otherwise local data gets lost.
+          if (localDirty[rawKey]) return;
 
           if (localStorage.getItem(rawKey) !== strVal) {
             localStorage.setItem(rawKey, strVal);
@@ -1067,41 +1096,6 @@ export default function App() {
   const enteredContainers = containers.filter(c => (c.containerNo && c.containerNo.trim()) || (c.sealNo && c.sealNo.trim()));
   const hasContainers = enteredContainers.length > 0;
   const hasNotify = Object.values(notifyParty).some((v) => v && v.trim());
-
-  const renderMarksAndNo = () => {
-    if (!hasContainers) return null;
-    return (
-      <>
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            fontStyle: "italic",
-            marginBottom: 2,
-            marginTop: 6,
-            background: "#e9e9e9",
-            padding: "3px 6px",
-            borderRadius: 2,
-          }}
-        >
-          MARKS & NO.
-        </div>
-        <table style={{ width: "100%", borderCollapse: "collapse", borderRadius: 3 }}>
-          <tbody>
-            {enteredContainers.map((c, idx) => (
-              <tr key={idx}>
-                <td style={td()}>
-                  {c.containerNo && `CONT NO: ${c.containerNo}`}
-                  {c.containerNo && c.sealNo && ", "}
-                  {c.sealNo && `SEAL NO: ${c.sealNo}`}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </>
-    );
-  };
 
   // ---------- Datalists from saved management data ----------
   const dlCurrencies = loadList("easyinvoice_currencies");
@@ -2704,6 +2698,7 @@ export default function App() {
                 >
                   <div
                     style={{
+                      display: "inline-block",
                       fontSize: 11,
                       fontWeight: 700,
                       fontStyle: "italic",
@@ -2719,34 +2714,39 @@ export default function App() {
                     <tbody>
                       {seller.name && (
                         <tr>
-                          <td style={td({ fontWeight: 700 })}>{seller.name}</td>
+                          <td style={tdn({ fontWeight: 700 })}>{seller.name}</td>
                         </tr>
                       )}
                       {seller.addr1 && (
                         <tr>
-                          <td style={td()}>{seller.addr1}</td>
+                          <td style={tdn()}>{seller.addr1}</td>
                         </tr>
                       )}
                       {seller.addr2 && (
                         <tr>
-                          <td style={td()}>{seller.addr2}</td>
+                          <td style={tdn()}>{seller.addr2}</td>
                         </tr>
                       )}
                       {seller.trn && (
                         <tr>
-                          <td style={td()}>TRN NO : {seller.trn}</td>
+                          <td style={tdn()}>TRN NO : {seller.trn}</td>
                         </tr>
                       )}
                       {seller.contact && (
                         <tr>
-                          <td style={td()}>CONTACT : {seller.contact}</td>
+                          <td style={tdn()}>CONTACT : {seller.contact}</td>
                         </tr>
                       )}
                       {seller.email && (
                         <tr>
-                          <td style={td()}>EMAIL : {seller.email}</td>
+                          <td style={tdn()}>EMAIL : {seller.email}</td>
                         </tr>
                       )}
+                      {Array.from({ length: Math.max(0, 8 - [seller.name, seller.addr1, seller.addr2, seller.trn, seller.contact, seller.email].filter(Boolean).length) }).map((_, i) => (
+                        <tr key={`s${i}`}>
+                          <td style={tdn()}>&nbsp;</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </td>
@@ -2856,21 +2856,11 @@ export default function App() {
                         </td>
                       </tr>
                       <tr>
-                        <td
-                          style={td({
-                            textAlign: "center",
-                            whiteSpace: "pre-line",
-                          })}
-                        >
-                          {meta.loadingAt}
+                        <td style={td({ textAlign: "center" })}>
+                          {inlineJoin(meta.loadingAt)}
                         </td>
-                        <td
-                          style={td({
-                            textAlign: "center",
-                            whiteSpace: "pre-line",
-                          })}
-                        >
-                          {meta.finalDestination}
+                        <td style={td({ textAlign: "center" })}>
+                          {inlineJoin(meta.finalDestination)}
                         </td>
                       </tr>
                     </tbody>
@@ -2894,6 +2884,7 @@ export default function App() {
                 >
                   <div
                     style={{
+                      display: "inline-block",
                       fontSize: 11,
                       fontWeight: 700,
                       fontStyle: "italic",
@@ -2910,22 +2901,22 @@ export default function App() {
                     <tbody>
                       {buyer.name && (
                         <tr>
-                          <td style={td({ fontWeight: 700 })}>{buyer.name}</td>
+                          <td style={tdn({ fontWeight: 700 })}>{buyer.name}</td>
                         </tr>
                       )}
                       {buyer.addr1 && (
                         <tr>
-                          <td style={td()}>{buyer.addr1}</td>
+                          <td style={tdn()}>{buyer.addr1}</td>
                         </tr>
                       )}
                       {buyer.addr2 && (
                         <tr>
-                          <td style={td()}>{buyer.addr2}</td>
+                          <td style={tdn()}>{buyer.addr2}</td>
                         </tr>
                       )}
                       {(buyer.gst || buyer.pan) && (
                         <tr>
-                          <td style={td()}>
+                          <td style={tdn()}>
                             {buyer.gst && `GST: ${buyer.gst}`}
                             {buyer.gst && buyer.pan && "     "}
                             {buyer.pan && `PAN: ${buyer.pan}`}
@@ -2934,21 +2925,25 @@ export default function App() {
                       )}
                       {buyer.contact && (
                         <tr>
-                          <td style={td()}>CONTACT : {buyer.contact}</td>
+                          <td style={tdn()}>CONTACT : {buyer.contact}</td>
                         </tr>
                       )}
                       {buyer.email && (
                         <tr>
-                          <td style={td()}>EMAIL : {buyer.email}</td>
+                          <td style={tdn()}>EMAIL : {buyer.email}</td>
                         </tr>
                       )}
+                      {Array.from({ length: Math.max(0, 8 - [buyer.name, buyer.addr1, buyer.addr2, (buyer.gst || buyer.pan), buyer.contact, buyer.email].filter(Boolean).length) }).map((_, i) => (
+                        <tr key={`b${i}`}>
+                          <td style={tdn()}>&nbsp;</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
-                  {/* Notify Party under Buyer — hidden when empty */}
-                  {Object.values(notifyParty).some((v) => v && v.trim()) && (
-                    <>
+                  {/* Notify Party under Buyer — always shown */}
                   <div
                     style={{
+                      display: "inline-block",
                       fontSize: 11,
                       fontWeight: 700,
                       fontStyle: "italic",
@@ -2965,33 +2960,50 @@ export default function App() {
                     <tbody>
                       {notifyParty.name && notifyParty.name !== "—" && (
                         <tr>
-                          <td style={td({ fontWeight: 700 })}>{notifyParty.name}</td>
+                          <td style={tdn({ fontWeight: 700 })}>{notifyParty.name}</td>
                         </tr>
                       )}
                       {notifyParty.addr1 && (
                         <tr>
-                          <td style={td()}>{notifyParty.addr1}</td>
+                          <td style={tdn()}>{notifyParty.addr1}</td>
                         </tr>
                       )}
                       {notifyParty.addr2 && (
                         <tr>
-                          <td style={td()}>{notifyParty.addr2}</td>
+                          <td style={tdn()}>{notifyParty.addr2}</td>
                         </tr>
                       )}
                       {notifyParty.email && (
                         <tr>
-                          <td style={td()}>EMAIL : {notifyParty.email}</td>
+                          <td style={tdn()}>EMAIL : {notifyParty.email}</td>
                         </tr>
                       )}
                       {notifyParty.contact && (
                         <tr>
-                          <td style={td()}>CONTACT : {notifyParty.contact}</td>
+                          <td style={tdn()}>CONTACT : {notifyParty.contact}</td>
                         </tr>
                       )}
+                      {!Object.values(notifyParty).some((v) => v && v.trim()) && (
+                        <tr>
+                          <td style={tdn({ fontStyle: "italic", color: "#888" })}>SAME AS CONSIGNEE</td>
+                        </tr>
+                      )}
+                      {Array.from({
+                        length: Math.max(0, 8 - [
+                          notifyParty.name && notifyParty.name !== "—",
+                          notifyParty.addr1,
+                          notifyParty.addr2,
+                          notifyParty.email,
+                          notifyParty.contact,
+                          !Object.values(notifyParty).some((v) => v && v.trim()),
+                        ].filter(Boolean).length),
+                      }).map((_, i) => (
+                        <tr key={`np${i}`}>
+                          <td style={tdn()}>&nbsp;</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
-                    </>
-                  )}
                 </td>
                 <td
                   style={td({
@@ -3014,8 +3026,8 @@ export default function App() {
                         </td>
                       </tr>
                       <tr>
-                        <td style={td({ whiteSpace: "pre-line" })}>
-                          {meta.packing}
+                        <td style={td()}>
+                          {inlineJoin(meta.packing)}
                         </td>
                       </tr>
                       <tr>
@@ -3190,91 +3202,98 @@ export default function App() {
                 width: "100%",
                 borderCollapse: "collapse",
                 marginTop: 10,
+                border: BORDER,
+                borderRadius: 3,
               }}
             >
               <tbody>
                 <tr>
+                  {/* Left: MARKS & NO. + AMOUNT IN WORDS */}
                   <td
-                    style={td({
+                    style={{
                       width: "55%",
-                      border: "none",
+                      padding: 0,
                       verticalAlign: "top",
-                    })}
+                      border: "none",
+                    }}
                   >
-                    {renderMarksAndNo()}
-                    <table style={{ width: "100%", borderCollapse: "collapse", marginTop: hasContainers ? 10 : 0 }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <tbody>
+                        {hasContainers && (
+                          <>
+                            <tr>
+                              <td style={{ fontWeight: 700, background: "#e9e9e9", padding: "3px 6px", fontSize: 10.5, border: "none" }}>
+                                MARKS & NO.
+                              </td>
+                            </tr>
+                            {enteredContainers.map((c, idx) => (
+                              <tr key={idx}>
+                                <td style={{ padding: "3px 6px", fontSize: 10.5, border: "none", borderBottom: idx === enteredContainers.length - 1 ? BORDER : "none" }}>
+                                  {c.containerNo && `CONT NO: ${c.containerNo}`}
+                                  {c.containerNo && c.sealNo && ", "}
+                                  {c.sealNo && `SEAL NO: ${c.sealNo}`}
+                                </td>
+                              </tr>
+                            ))}
+                          </>
+                        )}
                         <tr>
-                          <td
-                            style={td({
-                              fontWeight: 700,
-                              background: "#e9e9e9",
-                            })}
-                          >
+                          <td style={{ fontWeight: 700, background: "#e9e9e9", padding: "3px 6px", fontSize: 10.5, border: "none" }}>
                             AMOUNT IN WORDS
                           </td>
                         </tr>
                         <tr>
-                          <td style={td({ minWidth: 0, height: 40 })}>
+                          <td style={{ padding: "3px 6px", fontSize: 10.5, minWidth: 0, height: 40, border: "none", verticalAlign: "top" }}>
                             {meta.amountInWords || autoWords}
                           </td>
                         </tr>
                       </tbody>
                     </table>
                   </td>
+                  {/* Right: Amount Balance Calculation box */}
                   <td
-                    style={td({
+                    style={{
                       width: "45%",
-                      border: "none",
+                      padding: 0,
                       verticalAlign: "top",
-                    })}
+                      border: "none",
+                      borderLeft: BORDER,
+                    }}
                   >
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <tbody>
-                        <tr>
-                          <td style={td({ border: "none" })}>
-                            VAT @ {vatPercent}%
-                          </td>
-                          <td style={td({ textAlign: "right" })}>
-                            {vatAmount ? money(vatAmount) : "-"}
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style={td({ border: "none", fontWeight: 700 })}>
-                            TOTAL INCL VAT
-                          </td>
-                          <td style={td({ textAlign: "right", fontWeight: 700 })}>
-                            {money(totalInclVat)}
-                          </td>
-                        </tr>
-                        <tr>
-                          <td style={td({ border: "none" })}>
-                            ADVANCE {advancePercent}%
-                          </td>
-                          <td style={td({ textAlign: "right" })}>
-                            {money(advanceAmt)}
-                          </td>
-                        </tr>
-                        <tr>
-                          <td
-                            style={td({
-                              border: "none",
-                              fontWeight: 700,
-                              color: "#1a4fa0",
-                            })}
-                          >
-                            BALANCE TO PAY
-                          </td>
-                          <td
-                            style={td({
-                              textAlign: "right",
-                              fontWeight: 700,
-                              color: "#1a4fa0",
-                            })}
-                          >
-                            {money(balance)}
-                          </td>
-                        </tr>
+                        {[
+                          ["VAT @ " + vatPercent + "%", vatAmount ? money(vatAmount) : "-", false, false],
+                          ["TOTAL INCL VAT", money(totalInclVat), true, false],
+                          ["ADVANCE " + advancePercent + "%", money(advanceAmt), false, false],
+                          ["BALANCE", money(balance), true, true],
+                        ].map(([label, value, bold, isBalance], i) => (
+                          <tr key={label} style={{ borderBottom: i < 3 ? BORDER : "none" }}>
+                            <td
+                              style={{
+                                padding: "3px 6px",
+                                fontSize: isBalance ? 10 : 10.5,
+                                fontWeight: bold ? "bold" : "normal",
+                                border: "none",
+                                color: isBalance ? "#1a4fa0" : "#000",
+                              }}
+                            >
+                              {label}
+                            </td>
+                            <td
+                              style={{
+                                padding: "3px 6px",
+                                fontSize: isBalance ? 10 : 10.5,
+                                fontWeight: bold ? "bold" : "normal",
+                                textAlign: "right",
+                                border: "none",
+                                color: isBalance ? "#1a4fa0" : "#000",
+                              }}
+                            >
+                              {value}
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </td>
@@ -3289,61 +3308,61 @@ export default function App() {
               width: "100%",
               borderCollapse: "collapse",
               marginTop: 10,
+              border: BORDER,
+              borderRadius: 3,
             }}
           >
             <tbody>
               <tr>
                 <td
-                  style={td({
+                  style={{
                     width: "55%",
-                    border: "none",
+                    padding: 0,
                     verticalAlign: "top",
-                  })}
+                    border: "none",
+                  }}
                 >
                   {!isPackingMode && (
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <tbody>
                         <tr>
-                          <td
-                            style={td({
-                              fontWeight: 700,
-                              background: "#e9e9e9",
-                            })}
-                          >
+                          <td style={{ fontWeight: 700, padding: "5px 6px", fontSize: 10.5, border: "none" }}>
                             BANK DETAILS
                           </td>
                         </tr>
                         <tr>
-                          <td style={td()}>
+                          <td style={{ padding: "5px 6px", fontSize: 10.5, border: "none" }}>
                             ACC NAME : <b>{bank.accName}</b>
                           </td>
                         </tr>
                         <tr>
-                          <td style={td()}>BANK NAME : {bank.bankName}</td>
+                          <td style={{ padding: "5px 6px", fontSize: 10.5, border: "none" }}>BANK NAME : {bank.bankName}</td>
                         </tr>
                         <tr>
-                          <td style={td()}>ACC NO : {bank.accNo}</td>
+                          <td style={{ padding: "5px 6px", fontSize: 10.5, border: "none" }}>ACC NO : {bank.accNo}</td>
                         </tr>
                         <tr>
-                          <td style={td()}>IBAN NO : {bank.iban}</td>
+                          <td style={{ padding: "5px 6px", fontSize: 10.5, border: "none" }}>IBAN NO : {bank.iban}</td>
                         </tr>
                         <tr>
-                          <td style={td()}>SWIFT NO : {bank.swift}</td>
+                          <td style={{ padding: "5px 6px", fontSize: 10.5, border: "none" }}>SWIFT NO : {bank.swift}</td>
                         </tr>
                         <tr>
-                          <td style={td()}>ADDRESS : {bank.address}</td>
+                          <td style={{ padding: "5px 6px", fontSize: 10.5, border: "none" }}>ADDRESS : {bank.address}</td>
                         </tr>
                       </tbody>
                     </table>
                   )}
                 </td>
                 <td
-                  style={td({
+                  style={{
                     width: "45%",
-                    border: "none",
+                    padding: "5px 6px",
                     verticalAlign: "bottom",
                     textAlign: "center",
-                  })}
+                    border: "none",
+                    borderLeft: BORDER,
+                  }}
                 >
                   <div style={{ fontSize: 11, marginBottom: 4 }}>FOR</div>
                   <div style={{ fontWeight: 700, marginBottom: 8 }}>

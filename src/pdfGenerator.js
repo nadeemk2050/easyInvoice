@@ -7,6 +7,9 @@ const money = (n) =>
     maximumFractionDigits: 2,
   });
 
+// Join multi-line values into a single continuous line (e.g. "Area\nU.A.E" -> "Area, U.A.E")
+const inline = (s) => (s || "").replace(/\s*\n\s*/g, ", ");
+
 const ones = ["","ONE ","TWO ","THREE ","FOUR ","FIVE ","SIX ","SEVEN ","EIGHT ","NINE ","TEN ","ELEVEN ","TWELVE ","THIRTEEN ","FOURTEEN ","FIFTEEN ","SIXTEEN ","SEVENTEEN ","EIGHTEEN ","NINETEEN "];
 const tens = ["","","TWENTY ","THIRTY ","FORTY ","FIFTY ","SIXTY ","SEVENTY ","EIGHTY ","NINETY "];
 
@@ -253,6 +256,51 @@ export async function generateInvoicePdf(invoiceData) {
     y += h;
   }
 
+  // Bordered heading block WITHOUT the outer border — used by SELLER / BUYER / NOTIFY PARTY.
+  // Supports a fixed minLines height and a narrow (text-width) heading highlight so it
+  // never merges into the sections on the right.
+  function headingBlock(x, w, lines, opts = {}) {
+    const fontSize = opts.fontSize || 8;
+    const lineH = opts.lineH || 5;
+    const headingH = lineH + 1;
+    const minLines = opts.minLines || 0;
+
+    const processedLines = [];
+    lines.forEach((line, i) => {
+      setFont(fontSize, line.bold ? "bold" : "normal");
+      const textStr = (line.text || "").trim();
+      if (i === 0) {
+        processedLines.push({ text: textStr, bold: line.bold });
+      } else {
+        const wrapped = doc.splitTextToSize(textStr, w - 3);
+        if (wrapped.length > 0) {
+          wrapped.forEach((wl) => processedLines.push({ text: wl, bold: line.bold }));
+        } else {
+          processedLines.push({ text: "", bold: line.bold });
+        }
+      }
+    });
+    // Reserve a fixed height: pad with empty lines up to minLines total
+    while (processedLines.length < minLines) {
+      processedLines.push({ text: "", bold: false });
+    }
+
+    const h = processedLines.length * lineH + 1;
+    if (processedLines[0]?.bold) {
+      // Narrow highlight — only as wide as the heading text + small padding
+      setFont(fontSize, "bold");
+      const headingW = Math.min(w - 3, doc.getTextWidth(processedLines[0].text) + 4);
+      doc.setFillColor(233, 233, 233);
+      doc.rect(x, y, headingW, headingH, "F");
+    }
+    processedLines.forEach((line, i) => {
+      setFont(fontSize, line.bold ? "bold" : "normal");
+      const ly = i === 0 ? y + headingH / 2 : y + headingH + (i - 1) * lineH + lineH / 2;
+      doc.text(line.text, x + 1.5, ly + fontSize * 0.17, { maxWidth: w - 3 });
+    });
+    y += h;
+  }
+
   // ============== HEADER ==============
   // Left: logo or company name
   if (cleanLogo) {
@@ -302,7 +350,7 @@ export async function generateInvoicePdf(invoiceData) {
   if (seller.contact) sellerLines.push({ text: `CONTACT : ${seller.contact}` });
   if (seller.email) sellerLines.push({ text: `EMAIL : ${seller.email}` });
   
-  borderedBlock(ml, colLeft, sellerLines, { lineH: 4.0, fontSize: 7.5 });
+  headingBlock(ml, colLeft, sellerLines, { lineH: 4.0, fontSize: 7.5, minLines: 9 });
 
   const sellerBlockEnd = y;
 
@@ -337,8 +385,8 @@ export async function generateInvoicePdf(invoiceData) {
       { text: "FINAL DESTINATION", bold: true, fill: true, fillColor: [233, 233, 233] },
     ],
     [
-      { text: meta.loadingAt || "", align: "center" },
-      { text: meta.finalDestination || "", align: "center" },
+      { text: inline(meta.loadingAt), align: "center" },
+      { text: inline(meta.finalDestination), align: "center" },
     ],
   ];
 
@@ -357,7 +405,7 @@ export async function generateInvoicePdf(invoiceData) {
         maxLines = Math.max(maxLines, lines.length);
       }
     });
-    const h = Math.max(7, maxLines * 4 + 2);
+    const h = Math.max(9, maxLines * 4.5 + 4);
 
     if (hasSpan) {
       const cell = rowData.find((c) => c.colSpan === 2);
@@ -373,7 +421,7 @@ export async function generateInvoicePdf(invoiceData) {
         const lines = doc.splitTextToSize(cell.text || "", colRight - 2);
         lines.forEach((line, li) => {
           const lx = cell.align === "center" ? xStart + colRight / 2 : xStart + 1;
-          doc.text(line, lx, y + 3 + li * 4 + 7.5 * 0.35, {
+          doc.text(line, lx, y + 3.5 + li * 4.5 + 7.5 * 0.35, {
             align: cell.align === "center" ? "center" : "left",
           });
         });
@@ -396,7 +444,7 @@ export async function generateInvoicePdf(invoiceData) {
           const lines = doc.splitTextToSize(c.text || "", colW - 2);
           lines.forEach((line, li) => {
             const lx = c.align === "center" ? xStart + ci * colW + colW / 2 : xStart + ci * colW + 1;
-            doc.text(line, lx, y + 3 + li * 4 + 7.5 * 0.35, {
+            doc.text(line, lx, y + 3.5 + li * 4.5 + 7.5 * 0.35, {
               align: c.align === "center" ? "center" : "left",
             });
           });
@@ -436,7 +484,7 @@ export async function generateInvoicePdf(invoiceData) {
   if (buyer.contact) buyerLines.push({ text: `CONTACT : ${buyer.contact}` });
   if (buyer.email) buyerLines.push({ text: `EMAIL : ${buyer.email}` });
   
-  // --- NOTIFY PARTY block construction ---
+  // --- NOTIFY PARTY block construction (always shown) ---
   const notifyLines = [
     { text: "NOTIFY PARTY", bold: true },
   ];
@@ -447,8 +495,9 @@ export async function generateInvoicePdf(invoiceData) {
   if (notifyParty.addr2) notifyLines.push({ text: notifyParty.addr2 });
   if (notifyParty.email) notifyLines.push({ text: `EMAIL : ${notifyParty.email}` });
   if (notifyParty.contact) notifyLines.push({ text: `CONTACT : ${notifyParty.contact}` });
-
-  const hasNotify = notifyLines.length > 1;
+  if (notifyLines.length === 1) {
+    notifyLines.push({ text: "SAME AS CONSIGNEE" });
+  }
 
   const enteredContainers = (containers || []).filter(c => (c.containerNo && c.containerNo.trim()) || (c.sealNo && c.sealNo.trim()));
   const hasContainers = enteredContainers.length > 0;
@@ -462,12 +511,10 @@ export async function generateInvoicePdf(invoiceData) {
     containerLines.push({ text: parts.join(", ") });
   });
 
-  borderedBlock(ml, colLeft, buyerLines, { lineH: 4.0, fontSize: 7.5 });
+  headingBlock(ml, colLeft, buyerLines, { lineH: 4.0, fontSize: 7.5, minLines: 9 });
   const buyerBlockEnd = y;
 
-  if (hasNotify) {
-    borderedBlock(ml, colLeft, notifyLines, { lineH: 4.0, fontSize: 7.5 });
-  }
+  headingBlock(ml, colLeft, notifyLines, { lineH: 4.0, fontSize: 7.5, minLines: 9 });
   const notifyBlockEnd = y;
 
   // --- MISC block (right, continues from where meta block ended) ---
@@ -477,7 +524,7 @@ export async function generateInvoicePdf(invoiceData) {
       { text: "PACKING", colSpan: 2, bold: true, fill: true, fillColor: [233, 233, 233] },
     ],
     [
-      { text: meta.packing || "", colSpan: 2 },
+      { text: inline(meta.packing), colSpan: 2 },
     ],
     [
       { text: "PAYMENT TERMS", colSpan: 2, bold: true, fill: true, fillColor: [233, 233, 233] },
@@ -498,11 +545,11 @@ export async function generateInvoicePdf(invoiceData) {
     const xStart = ml + colLeft;
 
     // Calculate height for text wrapping
-    let reqH = 7;
+    let reqH = 9;
     if (cell.text && !cell.bold) {
       setFont(7.5, "normal");
       const lines = doc.splitTextToSize(cell.text || "", colRight - 2);
-      reqH = Math.max(7, lines.length * 4 + 2);
+      reqH = Math.max(9, lines.length * 4.5 + 4);
     }
     const h = reqH;
 
@@ -518,7 +565,7 @@ export async function generateInvoicePdf(invoiceData) {
       const lines = doc.splitTextToSize(cell.text || "", colRight - 2);
       lines.forEach((line, li) => {
         const lx = cell.align === "center" ? xStart + colRight / 2 : xStart + 1;
-        doc.text(line, lx, y + 3 + li * 4 + 7.5 * 0.35, {
+        doc.text(line, lx, y + 3.5 + li * 4.5 + 7.5 * 0.35, {
           align: cell.align === "center" ? "center" : "left",
         });
       });
@@ -628,61 +675,81 @@ export async function generateInvoicePdf(invoiceData) {
 
   y = doc.lastAutoTable.finalY + 4;
 
-  // ============== MARKS & NO. + AMOUNT IN WORDS + TOTALS ==============
+  // ============== MARKS & NO. + AMOUNT IN WORDS + TOTALS (unified box) ==============
   const totalsStartY = y;
+  const leftX = ml;
+  const leftW = colLeft;
+  const totalsX = ml + colLeft;
 
-  // --- MARKS & NO. block (left, above AMOUNT IN WORDS) ---
+  // --- Left: MARKS & NO. (top) ---
+  let leftCursor = totalsStartY;
+  let marksBottom = totalsStartY;
   if (hasContainers) {
-    borderedBlock(ml, colLeft, containerLines, { lineH: 4.0, fontSize: 7.5 });
-    y += 2; // small gap before AMOUNT IN WORDS
+    // gray highlight bar + heading text
+    setFont(7.5, "bold");
+    doc.setFillColor(233, 233, 233);
+    doc.rect(leftX, leftCursor, leftW, 5, "F");
+    doc.text("MARKS & NO.", leftX + 1.5, leftCursor + 2.5 + 7.5 * 0.35);
+    let rowY = leftCursor + 5;
+    containerLines.forEach((line, i) => {
+      if (i === 0) return; // heading already drawn
+      const wrapped = doc.splitTextToSize(line.text, leftW - 3);
+      setFont(7.5, "normal");
+      wrapped.forEach((wl, wi) => {
+        doc.text(wl, leftX + 1.5, rowY + wi * 4 + 7.5 * 0.35, { maxWidth: leftW - 3 });
+      });
+      rowY += wrapped.length * 4;
+    });
+    marksBottom = rowY + 1;
+    leftCursor = marksBottom;
   }
 
-  // --- AMOUNT IN WORDS (left, auto-filled from total) ---
+  // --- Left: AMOUNT IN WORDS ---
   const autoWords = meta.amountInWords || numToWords(totalInclVat, meta.currency, meta.subunit);
-  const wordsLinesArr = doc.splitTextToSize(autoWords, colLeft - 2);
+  const wordsLinesArr = doc.splitTextToSize(autoWords, leftW - 2);
   const wordsH = Math.max(12, wordsLinesArr.length * 4 + 6);
-  doc.setDrawColor(0);
-  doc.rect(ml, y, colLeft, wordsH, "S");
+  // gray highlight bar + heading text
   setFont(7.5, "bold");
-  doc.text("AMOUNT IN WORDS", ml + 1, y + 2 + 7.5 * 0.35);
+  doc.setFillColor(233, 233, 233);
+  doc.rect(leftX, leftCursor, leftW, 5, "F");
+  doc.text("AMOUNT IN WORDS", leftX + 1, leftCursor + 2 + 7.5 * 0.35);
   setFont(7.5, "normal");
   wordsLinesArr.forEach((line, li) => {
-    doc.text(line, ml + 1, y + 7 + li * 4 + 7.5 * 0.35, { maxWidth: colLeft - 2 });
+    doc.text(line, leftX + 1, leftCursor + 7 + li * 4 + 7.5 * 0.35, { maxWidth: leftW - 2 });
   });
+  const leftBottom = leftCursor + wordsH;
 
-  const leftSideEnd = y + wordsH;
-
-  // --- TOTALS (right) ---
-  const totalsX = ml + colLeft;
+  // --- Right: TOTALS (Amount Balance Calculation box) ---
   const totalsData = [
     [`VAT @ ${vatPercent}%`, vatAmount ? money(vatAmount) : "-"],
     ["TOTAL INCL VAT", money(totalInclVat)],
     [`ADVANCE ${advancePercent}%`, money(advanceAmt)],
-    ["BALANCE TO PAY", money(balance)],
+    ["BALANCE", money(balance)],
   ];
-
-  // Draw totals table manually starting at totalsStartY
   const totalsH = totalsData.length * 6 + 1;
-  doc.rect(totalsX, totalsStartY, colRight, totalsH, "S");
   totalsData.forEach((row, i) => {
     const ry = totalsStartY + i * 6;
     const isLast = i === totalsData.length - 1;
-    setFont(isLast ? 6.5 : 7.5, isLast ? "bold" : "normal");
-
+    // 10px (CSS) ≈ 7.5pt, bold for the BALANCE row
+    setFont(7.5, isLast ? "bold" : "normal");
     if (isLast) doc.setTextColor(26, 79, 160);
     else doc.setTextColor(0, 0, 0);
-
-    doc.text(row[0], totalsX + 2, ry + 3 + 7.5 * 0.35, {
-      maxWidth: colRight / 2 - 2,
-    });
-    doc.text(row[1], totalsX + colRight - 2, ry + 3 + 7.5 * 0.35, {
-      align: "right",
-      maxWidth: colRight / 2 - 2,
-    });
+    doc.text(row[0], totalsX + 2, ry + 3 + 7.5 * 0.35, { maxWidth: colRight / 2 - 2 });
+    doc.text(row[1], totalsX + colRight - 2, ry + 3 + 7.5 * 0.35, { align: "right", maxWidth: colRight / 2 - 2 });
   });
   doc.setTextColor(0, 0, 0);
 
-  y = Math.max(leftSideEnd, totalsStartY + totalsH) + 4;
+  // --- Unified outer border + single internal dividers (no double/broken lines) ---
+  const boxBottom = Math.max(leftBottom, totalsStartY + totalsH);
+  doc.setDrawColor(0);
+  doc.setLineWidth(0.5);
+  doc.rect(ml, totalsStartY, usable, boxBottom - totalsStartY, "S"); // one clean outer box
+  doc.line(totalsX, totalsStartY, totalsX, boxBottom);               // single vertical divider
+  if (hasContainers) {
+    doc.line(leftX, marksBottom, totalsX, marksBottom);              // single divider: MARKS | WORDS
+  }
+
+  y = boxBottom + 4;
 
   // ============== BANK DETAILS + SIGNATURE ==============
   // --- BANK DETAILS (left) ---
@@ -696,8 +763,13 @@ export async function generateInvoicePdf(invoiceData) {
     { text: `ADDRESS : ${bank.address}` },
   ];
   const bankH = bankLines.length * 5 + 2;
+  const sigX = ml + colLeft;
+  const sigH = bankH;
+  // Unified outer frame + single vertical divider (consistent 0.5 line width)
   doc.setDrawColor(0);
-  doc.rect(ml, y, colLeft, bankH, "S");
+  doc.setLineWidth(0.5);
+  doc.rect(ml, y, usable, bankH, "S");
+  doc.line(sigX, y, sigX, y + bankH);
   bankLines.forEach((line, i) => {
     setFont(7.5, line.bold ? "bold" : "normal");
     doc.text(line.text, ml + 1.5, y + 2 + i * 5 + 7.5 * 0.35, {
@@ -706,10 +778,6 @@ export async function generateInvoicePdf(invoiceData) {
   });
 
   // --- SIGNATURE (right) ---
-  const sigX = ml + colLeft;
-  const sigH = bankH;
-  doc.setDrawColor(0);
-  doc.rect(sigX, y, colRight, sigH, "S");
   setFont(7.5, "normal");
   doc.text("FOR", sigX + colRight / 2, y + 5, { align: "center" });
   setFont(7.5, "bold");

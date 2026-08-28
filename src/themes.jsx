@@ -543,11 +543,15 @@ function CorporateInvoicePreview(props) {
   const cell = (extra = {}) => ({ border: RULE, padding: "5px 8px", fontSize: 11, verticalAlign: "top", ...extra });
   const lbl = (extra = {}) => cell({ background: SOFT, fontWeight: 700, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, color: NAVY, ...extra });
   const containerText = containers
-    .map((cc) => [cc.containerNo, cc.sealNo].filter(Boolean).join(" · "))
+    .map((cc) => [cc.containerNo && `CONT: ${cc.containerNo}`, cc.sealNo && `SEAL: ${cc.sealNo}`].filter(Boolean).join("  "))
     .filter(Boolean);
+  // PDF-equivalent scaling: 1pt = (100/612)cqw so the preview matches the letter-size PDF
+  const titleSize = Math.max(10, Math.min(36, Number(titleFontSize) || 26));
+  const offX = (Number(titleXOffset) || 0) * 0.1634;
+  const offY = (Number(titleYOffset) || 0) * 0.1634;
 
   return (
-    <div style={{ fontFamily: "Arial, Helvetica, sans-serif", color: "#1c1c1c", width: "100%", maxWidth: 780, margin: "0 auto" }}>
+    <div style={{ fontFamily: "Arial, Helvetica, sans-serif", color: "#1c1c1c", width: "100%", maxWidth: 780, margin: "0 auto", containerType: "inline-size" }}>
       {/* Navy header band */}
       <div style={{ background: `linear-gradient(90deg, ${NAVY_DARK}, ${NAVY})`, color: "#fff", padding: "16px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", borderRadius: 6, marginBottom: 14 }}>
         <div>
@@ -562,57 +566,46 @@ function CorporateInvoicePreview(props) {
         {logo && <img src={logo} alt="logo" style={{ maxHeight: 56, maxWidth: 150, objectFit: "contain", background: "#fff", borderRadius: 4, padding: 4 }} />}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 12, position: "relative" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 12, position: "relative", minHeight: 30 }}>
         <div style={{
-          fontSize: `${titleFontSize || 26}px`,
+          position: "absolute",
+          bottom: 0,
+          left: titleAlign === "center" ? "50%" : titleAlign === "right" ? "auto" : 0,
+          right: titleAlign === "right" ? 0 : "auto",
+          transform: titleAlign === "center"
+            ? `translate(calc(-50% + ${offX}cqw), ${offY}cqw)`
+            : `translate(${offX}cqw, ${offY}cqw)`,
+          fontSize: `calc(${titleSize * 0.1634}cqw)`,
           fontWeight: 800,
           color: NAVY,
-          textAlign: titleAlign || "left",
-          transform: `translate(${titleXOffset || 0}px, ${titleYOffset || 0}px)`,
+          whiteSpace: "nowrap",
+          lineHeight: 1,
           transition: "transform 0.1s ease",
         }}>
           {titleText || "INVOICE"}
         </div>
-        <div style={{ textAlign: "right", fontSize: 11 }}>
+        <div style={{ marginLeft: "auto", textAlign: "right", fontSize: 11 }}>
           <div><b>Invoice #:</b> {meta.invoiceNo}</div>
           <div><b>Date:</b> {fmtDate(meta.date)}</div>
           <div><b>PO #:</b> {meta.supplierPo}</div>
         </div>
       </div>
 
-      {/* Meta strip */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", border: RULE, borderBottom: "none", marginBottom: 6 }}>
+      {/* Meta strip: Transport | Origin Country | Vessel | Ship Date | Marks & Numbers */}
+      <div style={{ display: "grid", gridTemplateColumns: "0.5fr 1fr 1fr 0.5fr 2fr", border: RULE, borderBottom: "none", marginBottom: 6 }}>
         {[
           ["Transport", meta.transportType],
+          ["Origin Country", meta.originOfGoods],
           ["Vessel", meta.driverVessel],
           ["Ship Date", fmtDate(meta.poDate)],
+          ["Marks & Numbers", containerText.join("\n")],
         ].map(([k, v], i) => (
-          <div key={i} style={{ borderRight: i < 2 ? RULE : "none", padding: "7px 10px", background: SOFT }}>
+          <div key={i} style={{ borderRight: i < 4 ? RULE : "none", padding: "7px 10px", background: SOFT }}>
             <div style={{ fontSize: 9.5, fontWeight: 700, color: NAVY, textTransform: "uppercase", letterSpacing: 0.5 }}>{k}</div>
-            <div style={{ fontSize: 11 }}>{v || "—"}</div>
+            <div style={{ fontSize: 10.5, whiteSpace: "pre-line", lineHeight: 1.4 }}>{v || "—"}</div>
           </div>
         ))}
       </div>
-
-      {/* Payment Terms — dedicated highlighted band */}
-      {(meta.paymentTerms || "").trim() ? (
-        <div
-          style={{
-            border: RULE,
-            borderLeft: "4px solid #f0a500",
-            background: "#fff7e0",
-            marginBottom: 14,
-            padding: "7px 10px",
-          }}
-        >
-          <div style={{ fontSize: 9.5, fontWeight: 800, color: "#9a6b00", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 }}>
-            Payment Terms
-          </div>
-          <div style={{ fontSize: 11, whiteSpace: "pre-line", lineHeight: 1.5 }}>{meta.paymentTerms}</div>
-        </div>
-      ) : (
-        <div style={{ height: 6 }} />
-      )}
 
       {/* BUYER / CONSIGNEE & NOTIFY PARTY */}
       <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 14 }}>
@@ -671,9 +664,28 @@ function CorporateInvoicePreview(props) {
         </tbody>
       </table>
 
-      {/* Totals */}
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
-        <div style={{ width: 270 }}>
+      {/* Details (Packing | Payment Terms | Bank) on the LEFT + Totals on the RIGHT */}
+      <div style={{ display: "flex", gap: 24, marginTop: 12, alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* 1. Packing Details */}
+          <div style={{ border: RULE, marginBottom: 10 }}>
+            <div style={{ background: SOFT, padding: "4px 8px", fontSize: 10, fontWeight: 700, color: NAVY, textTransform: "uppercase", letterSpacing: 0.5 }}>Packing Details</div>
+            <div style={{ padding: "5px 8px", fontSize: 11, whiteSpace: "pre-line", lineHeight: 1.5 }}>{meta.packing || "—"}</div>
+          </div>
+          {/* 2. Payment Terms */}
+          <div style={{ border: RULE, marginBottom: 10 }}>
+            <div style={{ background: SOFT, padding: "4px 8px", fontSize: 10, fontWeight: 700, color: NAVY, textTransform: "uppercase", letterSpacing: 0.5 }}>Payment Terms</div>
+            <div style={{ padding: "5px 8px", fontSize: 11, whiteSpace: "pre-line", lineHeight: 1.5 }}>{meta.paymentTerms || "—"}</div>
+          </div>
+          {/* 3. Bank Details */}
+          <div style={{ border: RULE }}>
+            <div style={{ background: SOFT, padding: "4px 8px", fontSize: 10, fontWeight: 700, color: NAVY, textTransform: "uppercase", letterSpacing: 0.5 }}>Bank Details</div>
+            <div style={{ padding: "5px 8px", fontSize: 11, whiteSpace: "pre-line", lineHeight: 1.5 }}>
+              {[`ACC NAME: ${bank.accName}`, `BANK: ${bank.bankName}`, `ACC NO: ${bank.accNo}`, `IBAN: ${bank.iban}`, `SWIFT: ${bank.swift}`].join("\n")}
+            </div>
+          </div>
+        </div>
+        <div style={{ width: 270, flexShrink: 0 }}>
           {[
             ["Subtotal", money(c.subtotal)],
             [`VAT (${vatPercent}%)`, money(c.vatAmount)],
@@ -692,29 +704,9 @@ function CorporateInvoicePreview(props) {
         </div>
       </div>
 
-      {/* Footer: notes / bank / signature */}
-      <div style={{ display: "flex", gap: 24, marginTop: 22, fontSize: 10.5, alignItems: "flex-start" }}>
-        <div style={{ flex: 1 }}>
-          {containerText.length > 0 && (
-            <>
-              <div style={{ fontSize: 10, fontWeight: 700, color: NAVY, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>Shipment Details</div>
-              {containerText.map((line, i) => <div key={i}>{line}</div>)}
-            </>
-          )}
-          {meta.packing && (
-            <>
-              <div style={{ fontSize: 10, fontWeight: 700, color: NAVY, textTransform: "uppercase", letterSpacing: 0.5, margin: "8px 0 4px" }}>Packing Details</div>
-              <div style={{ whiteSpace: "pre-line" }}>{meta.packing}</div>
-            </>
-          )}
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: NAVY, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>Bank Details</div>
-          <div style={{ whiteSpace: "pre-line" }}>
-            {[`ACC NAME: ${bank.accName}`, `BANK: ${bank.bankName}`, `ACC NO: ${bank.accNo}`, `IBAN: ${bank.iban}`, `SWIFT: ${bank.swift}`].join("\n")}
-          </div>
-        </div>
-        <div style={{ flex: 0.8, textAlign: "right" }}>
+      {/* Authorized Signatory (bottom right) */}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 22 }}>
+        <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: NAVY, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Authorized Signatory</div>
           <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "flex-end", gap: 8, minHeight: 48 }}>
             {signature && <img src={signature} alt="sig" style={{ maxHeight: 44, maxWidth: 90, objectFit: "contain" }} />}
@@ -1334,15 +1326,15 @@ export async function generateCorporateInvoicePdf(invoiceData) {
   setFont(tSize, "bold");
   doc.setTextColor(NAVY[0], NAVY[1], NAVY[2]);
 
-  const userX = (Number(titleXOffset) || 0) * 1.5;
-  const userY = (Number(titleYOffset) || 0) * 1.5;
-  let titleX = ml + userX;
+  const userX = Number(titleXOffset) || 0;
+  const userY = Number(titleYOffset) || 0;
+  let titleX = userX;
   let textAnchor = "left";
   if (titleAlign === "center") {
-    titleX = ml + (usable / 2) + userX;
+    titleX = pw / 2 + userX;
     textAnchor = "center";
   } else if (titleAlign === "right") {
-    titleX = ml + usable + userX;
+    titleX = pw + userX;
     textAnchor = "right";
   }
   text(titleText || "INVOICE", titleX, y + userY + 4, textAnchor);
@@ -1355,51 +1347,45 @@ export async function generateCorporateInvoicePdf(invoiceData) {
   text(`PO #: ${meta.supplierPo || ""}`, ml + usable, y + 18, "right");
   y += Math.max(tSize, 22) + 14;
 
-  // Meta strip (Transport, Vessel, Ship Date)
-  const stripW = usable / 3;
-  const stripH = 38;
+  // Meta strip: Transport | Origin Country | Vessel | Ship Date | Marks & Numbers
+  const marksLines = containers
+    .map((cc) => [cc.containerNo && `CONT: ${cc.containerNo}`, cc.sealNo && `SEAL: ${cc.sealNo}`].filter(Boolean).join("  "))
+    .filter(Boolean);
   const stripData = [
     ["Transport", meta.transportType],
+    ["Origin Country", meta.originOfGoods],
     ["Vessel", meta.driverVessel],
     ["Ship Date", fmtDate(meta.poDate)],
+    ["Marks & Numbers", marksLines.join("\n")],
   ];
+  // Column widths: Transport & Ship Date are half width, Marks & Numbers double width
+  const stripFactors = [0.5, 1, 1, 0.5, 2];
+  const stripCellW = (i) => usable * (stripFactors[i] / 5);
+  // Dynamic strip height so multi-line marks/numbers never overflow
+  setFont(8, "normal");
+  const valueLinesCount = (v, i) => (v ? doc.splitTextToSize(String(v), stripCellW(i) - 10).length : 1);
+  const maxValueLines = stripData.reduce((m, [, v], i) => Math.max(m, valueLinesCount(v, i)), 2);
+  const stripH = 22 + maxValueLines * 11;
   let sx = ml;
-  stripData.forEach(([k, v]) => {
-    fillRect(sx, y, stripW, stripH, SOFT);
+  stripData.forEach(([k, v], i) => {
+    const cellW = stripCellW(i);
+    fillRect(sx, y, cellW, stripH, SOFT);
     doc.setDrawColor(LINE[0], LINE[1], LINE[2]);
     doc.setLineWidth(0.6);
-    doc.rect(sx, y, stripW, stripH);
+    doc.rect(sx, y, cellW, stripH);
     setFont(8, "bold");
     doc.setTextColor(NAVY[0], NAVY[1], NAVY[2]);
-    text(k.toUpperCase(), sx + 8, y + 13);
+    text(k.toUpperCase(), sx + 5, y + 13);
     doc.setTextColor(0, 0, 0);
-    setFont(9, "normal");
-    text(String(v || "—"), sx + 8, y + 27);
-    sx += stripW;
+    setFont(8, "normal");
+    const lines = v ? doc.splitTextToSize(String(v), cellW - 10) : ["—"];
+    let vy = y + 25;
+    lines.forEach((line) => { text(line, sx + 5, vy); vy += 11; });
+    sx += cellW;
   });
   y += stripH + 8;
 
-  // Payment Terms — dedicated highlighted band
-  if ((meta.paymentTerms || "").trim()) {
-    const termsLines = doc.splitTextToSize(String(meta.paymentTerms), usable - 24);
-    const termsH = termsLines.length * 11 + 22;
-    fillRect(ml, y, usable, termsH, [255, 247, 224]);
-    doc.setFillColor(240, 165, 0);
-    doc.rect(ml, y, 4, termsH, "F");
-    doc.setDrawColor(LINE[0], LINE[1], LINE[2]);
-    doc.setLineWidth(0.6);
-    doc.rect(ml, y, usable, termsH);
-    setFont(8, "bold");
-    doc.setTextColor(154, 107, 0);
-    text("PAYMENT TERMS", ml + 10, y + 13);
-    doc.setTextColor(0, 0, 0);
-    setFont(9, "normal");
-    let ty = y + 25;
-    termsLines.forEach((line) => { text(line, ml + 10, ty); ty += 11; });
-    y += termsH + 10;
-  } else {
-    y += 4;
-  }
+  y += 4;
 
   // BUYER / CONSIGNEE & NOTIFY PARTY (Completely non-overlapping line rendering)
   const colGap = 12;
@@ -1497,70 +1483,88 @@ export async function generateCorporateInvoicePdf(invoiceData) {
     y += ih;
   });
 
-  // Totals block
+  // Details (Packing | Payment Terms | Bank) on the left + Totals on the right
   y += 8;
+  const sectionTop = y;
   const totW = 250;
   let tx = ml + usable - totW;
+  const leftW = tx - ml - 20; // left column width
   const totalRows = [
     ["Subtotal", money(c.subtotal)],
     [`VAT (${vatPercent}%)`, money(c.vatAmount)],
     ["Total incl. VAT", money(c.totalInclVat)],
     [`Advance (${advancePercent}%)`, money(c.advanceAmt)],
   ];
+
+  // --- Totals (right) ---
+  let ty = sectionTop;
   setFont(9, "normal");
   totalRows.forEach(([k, v]) => {
-    fillRect(tx, y, totW, 18, [246, 250, 253]);
+    fillRect(tx, ty, totW, 18, [246, 250, 253]);
     doc.setDrawColor(LINE[0], LINE[1], LINE[2]);
     doc.setLineWidth(0.5);
-    doc.rect(tx, y, totW, 18);
+    doc.rect(tx, ty, totW, 18);
     setFont(9, "bold");
     doc.setTextColor(NAVY[0], NAVY[1], NAVY[2]);
-    text(k, tx + 8, y + 12);
+    text(k, tx + 8, ty + 12);
     doc.setTextColor(0, 0, 0);
     setFont(9, "normal");
-    text(v, tx + totW - 8, y + 12, "right");
-    y += 18;
+    text(v, tx + totW - 8, ty + 12, "right");
+    ty += 18;
   });
-  fillRect(tx, y, totW, 24, NAVY);
+  fillRect(tx, ty, totW, 24, NAVY);
   setFont(12, "bold");
   doc.setTextColor(255, 255, 255);
-  text("BALANCE DUE", tx + 8, y + 16);
-  text(`${meta.currency || ""} ${money(c.balance)}`.trim(), tx + totW - 8, y + 16, "right");
+  text("BALANCE DUE", tx + 8, ty + 16);
+  text(`${meta.currency || ""} ${money(c.balance)}`.trim(), tx + totW - 8, ty + 16, "right");
   doc.setTextColor(0, 0, 0);
-  y += 24 + 14;
+  ty += 24;
 
-  // Footer: Shipment Details, Bank Details, and Authorized Signatory
-  const footerStartY = y;
-  setFont(8, "bold");
-  doc.setTextColor(NAVY[0], NAVY[1], NAVY[2]);
-  text("SHIPMENT DETAILS", ml, y);
-  text("BANK DETAILS", ml + 180, y);
-  text("AUTHORIZED SIGNATORY", ml + usable, y, "right");
-  doc.setTextColor(0, 0, 0);
-  y += 10;
+  // --- Left: Packing Details, Payment Terms, Bank Details (vertical) ---
+  const detailsBox = (title, lines, startY) => {
+    const hdrH = 16;
+    const totalH = hdrH + Math.max(lines.length, 1) * 11 + 6;
+    fillRect(ml, startY, leftW, hdrH, SOFT);
+    doc.setDrawColor(LINE[0], LINE[1], LINE[2]);
+    doc.setLineWidth(0.6);
+    doc.rect(ml, startY, leftW, totalH);
+    setFont(8, "bold");
+    doc.setTextColor(NAVY[0], NAVY[1], NAVY[2]);
+    text(title, ml + 8, startY + 11);
+    doc.setTextColor(0, 0, 0);
+    setFont(8.5, "normal");
+    let ly = startY + hdrH + 7;
+    (lines.length ? lines : ["—"]).forEach((l) => { text(l, ml + 8, ly); ly += 11; });
+    return startY + totalH;
+  };
 
-  // Shipment column
-  setFont(8.5, "normal");
-  let ny2 = y;
-  const containerLines = containers
-    .map((cc) => [cc.containerNo && `Container: ${cc.containerNo}`, cc.sealNo && `Seal: ${cc.sealNo}`].filter(Boolean).join("  "))
-    .filter(Boolean);
-  containerLines.forEach((l) => { text(l, ml, ny2); ny2 += 10; });
-  if (meta.packing) meta.packing.split("\n").forEach((l) => { text(l, ml, ny2); ny2 += 10; });
-
-  // Bank column
-  let by2 = y;
+  let dy = sectionTop;
+  const packingLines = meta.packing ? doc.splitTextToSize(String(meta.packing), leftW - 12) : [];
+  dy = detailsBox("PACKING DETAILS", packingLines, dy);
+  dy += 6;
+  const termsLines = (meta.paymentTerms || "").trim() ? doc.splitTextToSize(String(meta.paymentTerms), leftW - 12) : [];
+  dy = detailsBox("PAYMENT TERMS", termsLines, dy);
+  dy += 6;
   const bankLines = [`ACC NAME: ${bank.accName}`, `BANK: ${bank.bankName}`, `ACC NO: ${bank.accNo}`, `IBAN: ${bank.iban}`, `SWIFT: ${bank.swift}`].filter(Boolean);
-  bankLines.forEach((l) => { text(l, ml + 180, by2); by2 += 10; });
+  const bankWrapped = [];
+  bankLines.forEach((l) => { bankWrapped.push(...doc.splitTextToSize(l, leftW - 12)); });
+  dy = detailsBox("BANK DETAILS", bankWrapped, dy);
 
-  // Signatory column (Signature + Stamp side by side above seller name)
+  // Continue below the taller of the two columns
+  y = Math.max(dy, ty) + 18;
+
+  // --- Authorized Signatory (bottom right) ---
   const sW = Number(sigWidth) || 36;
   const sH = Number(sigHeight) || 16;
   const stW = Number(stampWidth) || 36;
   const stH = Number(stampHeight) || 20;
   const maxImgH = Math.max(sH, stH, 20);
 
-  const sigTopY = footerStartY + 14;
+  setFont(8, "bold");
+  doc.setTextColor(NAVY[0], NAVY[1], NAVY[2]);
+  text("AUTHORIZED SIGNATORY", ml + usable, y, "right");
+  doc.setTextColor(0, 0, 0);
+  const sigTopY = y + 10;
   if (cleanSignature && cleanStamp) {
     const stampRight = ml + usable;
     const stampLeft = stampRight - stW;
