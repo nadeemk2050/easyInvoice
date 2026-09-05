@@ -183,18 +183,27 @@ function CustomersModal({ onClose, onSelect }) {
   const [list, setList] = useState(() => load(LS.customers));
   const [editing, setEditing] = useState(null);
 
-  const empty = { name: "", addr1: "", addr2: "", gst: "", pan: "", contact: "", email: "" };
+  const empty = { name: "", addr1: "", addr2: "", taxType: "GST", taxNumber: "", gst: "", trn: "", pan: "", contact: "", email: "" };
   const [form, setForm] = useState(empty);
   const set = (k) => (v) => setForm({ ...form, [k]: v });
 
   const addCustomer = () => {
+    const isTrn = (form.taxType || (form.trn ? "TRN" : "GST")) === "TRN";
+    const taxVal = (form.taxNumber !== undefined ? form.taxNumber : (isTrn ? form.trn : form.gst)) || "";
+    const customerToSave = {
+      ...form,
+      taxType: isTrn ? "TRN" : "GST",
+      trn: isTrn ? taxVal : "",
+      gst: isTrn ? "" : taxVal,
+      taxNumber: taxVal,
+    };
     if (editing !== null) {
       const next = [...list];
-      next[editing] = form;
+      next[editing] = customerToSave;
       setList(next);
       save(LS.customers, next);
     } else {
-      const next = [...list, form];
+      const next = [...list, customerToSave];
       setList(next);
       save(LS.customers, next);
     }
@@ -202,7 +211,19 @@ function CustomersModal({ onClose, onSelect }) {
     setEditing(null);
   };
 
-  const editCustomer = (i) => { setForm(list[i]); setEditing(i); };
+  const editCustomer = (i) => {
+    const c = list[i];
+    const isTrn = c.taxType === "TRN" || (!!c.trn && !c.gst);
+    const taxVal = isTrn ? (c.trn || c.gst || c.taxNumber || "") : (c.gst || c.trn || c.taxNumber || "");
+    setForm({
+      ...c,
+      taxType: isTrn ? "TRN" : "GST",
+      taxNumber: taxVal,
+      trn: isTrn ? taxVal : "",
+      gst: isTrn ? "" : taxVal,
+    });
+    setEditing(i);
+  };
   const deleteCustomer = (i) => {
     const pw = prompt("Enter password 'abcd' to delete this customer:");
     if (pw !== "abcd") {
@@ -227,7 +248,66 @@ function CustomersModal({ onClose, onSelect }) {
             <div><label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>Name</label><input style={inputStyle} value={form.name} onChange={(e) => set("name")(e.target.value)} /></div>
             <div><label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>Address Line 1</label><input style={inputStyle} value={form.addr1} onChange={(e) => set("addr1")(e.target.value)} /></div>
             <div><label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>Address Line 2</label><input style={inputStyle} value={form.addr2} onChange={(e) => set("addr2")(e.target.value)} /></div>
-            <div><label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>GST</label><input style={inputStyle} value={form.gst} onChange={(e) => set("gst")(e.target.value)} /></div>
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+                <label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>
+                  {form.taxType === "TRN" ? "TRN" : "GST"}
+                </label>
+                <div style={{ display: "inline-flex", background: "#f0f0f0", borderRadius: 4, padding: 1 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const val = form.taxNumber !== undefined ? form.taxNumber : (form.taxType === "TRN" ? form.trn : form.gst);
+                      setForm({ ...form, taxType: "GST", gst: val, trn: "", taxNumber: val });
+                    }}
+                    style={{
+                      border: "none",
+                      padding: "1px 6px",
+                      fontSize: 9,
+                      fontWeight: 700,
+                      borderRadius: 3,
+                      cursor: "pointer",
+                      background: form.taxType !== "TRN" ? "#1c1c1c" : "transparent",
+                      color: form.taxType !== "TRN" ? "#fff" : "#666",
+                    }}
+                  >
+                    GST
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const val = form.taxNumber !== undefined ? form.taxNumber : (form.taxType === "TRN" ? form.trn : form.gst);
+                      setForm({ ...form, taxType: "TRN", trn: val, gst: "", taxNumber: val });
+                    }}
+                    style={{
+                      border: "none",
+                      padding: "1px 6px",
+                      fontSize: 9,
+                      fontWeight: 700,
+                      borderRadius: 3,
+                      cursor: "pointer",
+                      background: form.taxType === "TRN" ? "#1c1c1c" : "transparent",
+                      color: form.taxType === "TRN" ? "#fff" : "#666",
+                    }}
+                  >
+                    TRN
+                  </button>
+                </div>
+              </div>
+              <input
+                style={inputStyle}
+                placeholder={`Enter ${form.taxType === "TRN" ? "TRN" : "GST"} number`}
+                value={form.taxNumber !== undefined ? form.taxNumber : (form.taxType === "TRN" ? form.trn : form.gst) || ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (form.taxType === "TRN") {
+                    setForm({ ...form, taxNumber: v, trn: v, gst: "" });
+                  } else {
+                    setForm({ ...form, taxNumber: v, gst: v, trn: "" });
+                  }
+                }}
+              />
+            </div>
             <div><label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>PAN</label><input style={inputStyle} value={form.pan} onChange={(e) => set("pan")(e.target.value)} /></div>
             <div><label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>Contact</label><input style={inputStyle} value={form.contact} onChange={(e) => set("contact")(e.target.value)} /></div>
             <div><label style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600 }}>Email</label><input style={inputStyle} value={form.email} onChange={(e) => set("email")(e.target.value)} /></div>
@@ -241,6 +321,13 @@ function CustomersModal({ onClose, onSelect }) {
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700, fontSize: 13 }}>{c.name || "Unnamed"}</div>
               <div style={{ fontSize: 11, color: "#888" }}>{c.addr1}{c.addr1 && ", "}{c.addr2}</div>
+              <div style={{ fontSize: 10, color: "#555", marginTop: 2 }}>
+                {[
+                  (c.taxType === "TRN" || (c.trn && !c.gst)) ? (c.trn || c.gst ? `TRN: ${c.trn || c.gst}` : "") : (c.gst || c.trn ? `GST: ${c.gst || c.trn}` : ""),
+                  c.pan ? `PAN: ${c.pan}` : "",
+                  c.contact || "",
+                ].filter(Boolean).join(" · ")}
+              </div>
             </div>
             <div style={{ display: "flex", gap: 4 }}>
               <button style={{ padding: "4px 10px", fontSize: 11, border: "1px solid #d4d4d4", borderRadius: 4, background: "#fff" }} onClick={() => selectCustomer(c)}>Use</button>
@@ -636,11 +723,15 @@ export default function ManagementMenu({ uid, onCompany, onCustomer, sellers, se
 
   const handleCustomerSelect = (data) => {
     if (setBuyer) {
+      const isTrn = data.taxType === "TRN" || (!!data.trn && !data.gst);
+      const taxVal = isTrn ? (data.trn || data.gst || data.taxNumber || "") : (data.gst || data.trn || data.taxNumber || "");
       setBuyer({
         name: data.name || "",
         addr1: data.addr1 || "",
         addr2: data.addr2 || "",
-        gst: data.gst || "",
+        taxType: isTrn ? "TRN" : "GST",
+        trn: isTrn ? taxVal : "",
+        gst: isTrn ? "" : taxVal,
         pan: data.pan || "",
         contact: data.contact || "",
         email: data.email || "",

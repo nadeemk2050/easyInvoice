@@ -76,19 +76,23 @@ function loadHistory() {
 function saveToHistory(invoice) {
   const list = loadHistory();
   const newInvNo = (invoice.meta?.invoiceNo || "").trim();
-  const newRefNo = (invoice.meta?.refNo || "").trim();
-  const dup = list.find((inv) => {
-    const invNo = (inv.meta?.invoiceNo || "").trim();
-    const refNo = (inv.meta?.refNo || "").trim();
-    return (newInvNo && invNo && invNo.toLowerCase() === newInvNo.toLowerCase()) ||
-           (newRefNo && refNo && refNo.toLowerCase() === newRefNo.toLowerCase());
-  });
-  if (dup) return false;
+  const dupIdx = newInvNo
+    ? list.findIndex((inv) => {
+        const invNo = (inv.meta?.invoiceNo || "").trim();
+        return invNo && invNo.toLowerCase() === newInvNo.toLowerCase();
+      })
+    : -1;
 
   // Strip large base64 image data to prevent QuotaExceededError in localStorage
   const { logo: _logo, signature: _signature, stamp: _stamp, ...cleanInvoice } = invoice;
+  const itemToStore = { ...cleanInvoice, savedAt: new Date().toISOString() };
 
-  list.unshift({ ...cleanInvoice, savedAt: new Date().toISOString() });
+  if (dupIdx !== -1) {
+    list[dupIdx] = itemToStore;
+  } else {
+    list.unshift(itemToStore);
+  }
+
   localStorage.setItem(_key("easyinvoice_history"), JSON.stringify(list.slice(0, 50)));
   return true;
 }
@@ -108,18 +112,22 @@ function loadPackingHistory() {
 function saveToPackingHistory(packList) {
   const list = loadPackingHistory();
   const newInvNo = (packList.meta?.invoiceNo || "").trim();
-  const newRefNo = (packList.meta?.refNo || "").trim();
-  const dup = list.find((item) => {
-    const invNo = (item.meta?.invoiceNo || "").trim();
-    const refNo = (item.meta?.refNo || "").trim();
-    return (newInvNo && invNo && invNo.toLowerCase() === newInvNo.toLowerCase()) ||
-           (newRefNo && refNo && refNo.toLowerCase() === newRefNo.toLowerCase());
-  });
-  if (dup) return false;
+  const dupIdx = newInvNo
+    ? list.findIndex((item) => {
+        const invNo = (item.meta?.invoiceNo || "").trim();
+        return invNo && invNo.toLowerCase() === newInvNo.toLowerCase();
+      })
+    : -1;
 
   const { logo: _logo, signature: _signature, stamp: _stamp, ...cleanPackList } = packList;
+  const itemToStore = { ...cleanPackList, savedAt: new Date().toISOString() };
 
-  list.unshift({ ...cleanPackList, savedAt: new Date().toISOString() });
+  if (dupIdx !== -1) {
+    list[dupIdx] = itemToStore;
+  } else {
+    list.unshift(itemToStore);
+  }
+
   localStorage.setItem(_key("easyinvoice_packinghistory"), JSON.stringify(list.slice(0, 50)));
   return true;
 }
@@ -164,6 +172,70 @@ function field(label, value, onChange, placeholder, small, listId, disabled) {
         }}
       />
     </label>
+  );
+}
+
+function taxField(taxType, taxValue, onTypeChange, onValueChange) {
+  const currentType = taxType === "TRN" ? "TRN" : "GST";
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+        <span style={{ fontSize: 11, color: "#6b6b6b", fontWeight: 600, letterSpacing: 0.3 }}>
+          {currentType}
+        </span>
+        <div style={{ display: "inline-flex", background: "#eee", borderRadius: 4, padding: 1 }}>
+          <button
+            type="button"
+            onClick={() => onTypeChange("GST")}
+            style={{
+              border: "none",
+              padding: "2px 7px",
+              fontSize: 10,
+              fontWeight: 700,
+              borderRadius: 3,
+              cursor: "pointer",
+              background: currentType === "GST" ? "#1c1c1c" : "transparent",
+              color: currentType === "GST" ? "#fff" : "#666",
+            }}
+          >
+            GST
+          </button>
+          <button
+            type="button"
+            onClick={() => onTypeChange("TRN")}
+            style={{
+              border: "none",
+              padding: "2px 7px",
+              fontSize: 10,
+              fontWeight: 700,
+              borderRadius: 3,
+              cursor: "pointer",
+              background: currentType === "TRN" ? "#1c1c1c" : "transparent",
+              color: currentType === "TRN" ? "#fff" : "#666",
+            }}
+          >
+            TRN
+          </button>
+        </div>
+      </div>
+      <input
+        value={taxValue || ""}
+        placeholder={`Enter ${currentType} number`}
+        onChange={(e) => onValueChange(e.target.value)}
+        style={{
+          display: "block",
+          width: "100%",
+          padding: "7px 8px",
+          fontSize: 13,
+          border: "1px solid #d4d4d4",
+          borderRadius: 5,
+          outline: "none",
+          fontFamily: "inherit",
+          boxSizing: "border-box",
+          backgroundColor: "#fff",
+        }}
+      />
+    </div>
   );
 }
 
@@ -331,7 +403,9 @@ export default function App() {
     name: "GOLCHA ASSOCIATES",
     addr1: "GOLCHA GARDENS, VILLE PARLE",
     addr2: "MH, THANE",
+    taxType: "GST",
     gst: "",
+    trn: "",
     pan: "",
     contact: "",
     email: "",
@@ -341,6 +415,10 @@ export default function App() {
     name: "",
     addr1: "",
     addr2: "",
+    taxType: "GST",
+    gst: "",
+    trn: "",
+    pan: "",
     email: "",
     contact: "",
   });
@@ -440,8 +518,17 @@ export default function App() {
   const [editingIndex, setEditingIndex] = useState(null);
   const [invoiceSearchQuery, setInvoiceSearchQuery] = useState("");
   const [showInvoiceSearch, setShowInvoiceSearch] = useState(false);
+  const [invoiceSort, setInvoiceSort] = useState("latest_created");
+  const [invoiceDateFilterType, setInvoiceDateFilterType] = useState("created");
+  const [invoiceDateFrom, setInvoiceDateFrom] = useState("");
+  const [invoiceDateTo, setInvoiceDateTo] = useState("");
+
   const [packingSearchQuery, setPackingSearchQuery] = useState("");
   const [showPackingSearch, setShowPackingSearch] = useState(false);
+  const [packingSort, setPackingSort] = useState("latest_created");
+  const [packingDateFilterType, setPackingDateFilterType] = useState("created");
+  const [packingDateFrom, setPackingDateFrom] = useState("");
+  const [packingDateTo, setPackingDateTo] = useState("");
   const [quickEntryMode, setQuickEntryMode] = useState(false);
   const [quickInvoiceChecked, setQuickInvoiceChecked] = useState(true);
   const [quickPackingChecked, setQuickPackingChecked] = useState(false);
@@ -449,7 +536,7 @@ export default function App() {
   const [quickReference, setQuickReference] = useState("");
   const [quickTransport, setQuickTransport] = useState("");
   const [quickPacking, setQuickPacking] = useState("");
-  const [quickBuyer, setQuickBuyer] = useState({ name: "", addr1: "", addr2: "", gst: "", pan: "", contact: "", email: "" });
+  const [quickBuyer, setQuickBuyer] = useState({ name: "", addr1: "", addr2: "", taxType: "GST", gst: "", trn: "", pan: "", contact: "", email: "" });
   const [quickRows, setQuickRows] = useState([{ description: "", qty: "", rate: "", per: "MTS" }]);
   const [quickVat, setQuickVat] = useState("");
   const [quickBankIndex, setQuickBankIndex] = useState("");
@@ -473,8 +560,8 @@ export default function App() {
 
   // ---------- helpers ----------
   const resetForNewDocument = (packingMode) => {
-    setBuyer({ name: "", addr1: "", addr2: "", gst: "", pan: "", contact: "", email: "" });
-    setNotifyParty({ name: "", addr1: "", addr2: "", email: "", contact: "" });
+    setBuyer({ name: "", addr1: "", addr2: "", taxType: "GST", gst: "", trn: "", pan: "", contact: "", email: "" });
+    setNotifyParty({ name: "", addr1: "", addr2: "", taxType: "GST", gst: "", trn: "", pan: "", email: "", contact: "" });
     setContainers([]);
     setMeta({
       invoiceNo: "",
@@ -514,7 +601,7 @@ export default function App() {
     setQuickReference("");
     setQuickTransport("");
     setQuickPacking("");
-    setQuickBuyer({ name: "", addr1: "", addr2: "", gst: "", pan: "", contact: "", email: "" });
+    setQuickBuyer({ name: "", addr1: "", addr2: "", taxType: "GST", gst: "", trn: "", pan: "", contact: "", email: "" });
     setQuickRows([{ description: "", qty: "", rate: "", per: "MTS" }]);
     setQuickVat("");
     setQuickBankIndex("");
@@ -703,6 +790,124 @@ export default function App() {
       })
       .replace(/ /g, "-");
   };
+
+  const parseDocDate = (str) => {
+    if (!str) return 0;
+    const clean = String(str).trim();
+    if (clean.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      return new Date(clean + "T00:00:00").getTime();
+    }
+    const d = new Date(clean);
+    return isNaN(d.getTime()) ? 0 : d.getTime();
+  };
+
+  const getDocDateIso = (str) => {
+    if (!str) return "";
+    const clean = String(str).trim();
+    if (clean.match(/^\d{4}-\d{2}-\d{2}$/)) return clean;
+    const d = new Date(clean);
+    return !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : clean;
+  };
+
+  const processedInvoices = useMemo(() => {
+    let list = [...history];
+
+    if (invoiceSearchQuery) {
+      const q = invoiceSearchQuery.toLowerCase();
+      list = list.filter((inv) => {
+        const dateStr = inv.savedAt ? new Date(inv.savedAt).toLocaleDateString() : "";
+        const invDateStr = inv.meta?.date ? (fmtDate(inv.meta.date) || inv.meta.date).toLowerCase() : "";
+        const itemsStr = (inv.items || []).map((it) => it.description || "").join(" ").toLowerCase();
+        return (
+          inv.meta?.invoiceNo?.toLowerCase().includes(q) ||
+          inv.meta?.refNo?.toLowerCase().includes(q) ||
+          inv.buyer?.name?.toLowerCase().includes(q) ||
+          inv.meta?.transportType?.toLowerCase().includes(q) ||
+          dateStr.includes(q) ||
+          invDateStr.includes(q) ||
+          itemsStr.includes(q)
+        );
+      });
+    }
+
+    if (invoiceDateFrom || invoiceDateTo) {
+      list = list.filter((inv) => {
+        const itemDate = invoiceDateFilterType === "created"
+          ? (inv.savedAt ? inv.savedAt.slice(0, 10) : "")
+          : getDocDateIso(inv.meta?.date);
+        if (!itemDate) return false;
+        if (invoiceDateFrom && itemDate < invoiceDateFrom) return false;
+        if (invoiceDateTo && itemDate > invoiceDateTo) return false;
+        return true;
+      });
+    }
+
+    list.sort((a, b) => {
+      if (invoiceSort === "oldest_created") {
+        return (new Date(a.savedAt || 0).getTime()) - (new Date(b.savedAt || 0).getTime());
+      }
+      if (invoiceSort === "latest_invoice") {
+        return parseDocDate(b.meta?.date) - parseDocDate(a.meta?.date);
+      }
+      if (invoiceSort === "oldest_invoice") {
+        return parseDocDate(a.meta?.date) - parseDocDate(b.meta?.date);
+      }
+      // default: latest_created
+      return (new Date(b.savedAt || 0).getTime()) - (new Date(a.savedAt || 0).getTime());
+    });
+
+    return list;
+  }, [history, invoiceSearchQuery, invoiceSort, invoiceDateFilterType, invoiceDateFrom, invoiceDateTo]);
+
+  const processedPacking = useMemo(() => {
+    let list = [...packingHistory];
+
+    if (packingSearchQuery) {
+      const q = packingSearchQuery.toLowerCase();
+      list = list.filter((pack) => {
+        const dateStr = pack.savedAt ? new Date(pack.savedAt).toLocaleDateString() : "";
+        const packDateStr = pack.meta?.date ? (fmtDate(pack.meta.date) || pack.meta.date).toLowerCase() : "";
+        const goodsStr = (pack.packingItems || []).map((it) => it.descriptionOfGoods || "").join(" ").toLowerCase();
+        return (
+          pack.meta?.invoiceNo?.toLowerCase().includes(q) ||
+          pack.meta?.refNo?.toLowerCase().includes(q) ||
+          pack.buyer?.name?.toLowerCase().includes(q) ||
+          pack.meta?.transportType?.toLowerCase().includes(q) ||
+          dateStr.includes(q) ||
+          packDateStr.includes(q) ||
+          goodsStr.includes(q)
+        );
+      });
+    }
+
+    if (packingDateFrom || packingDateTo) {
+      list = list.filter((pack) => {
+        const itemDate = packingDateFilterType === "created"
+          ? (pack.savedAt ? pack.savedAt.slice(0, 10) : "")
+          : getDocDateIso(pack.meta?.date);
+        if (!itemDate) return false;
+        if (packingDateFrom && itemDate < packingDateFrom) return false;
+        if (packingDateTo && itemDate > packingDateTo) return false;
+        return true;
+      });
+    }
+
+    list.sort((a, b) => {
+      if (packingSort === "oldest_created") {
+        return (new Date(a.savedAt || 0).getTime()) - (new Date(b.savedAt || 0).getTime());
+      }
+      if (packingSort === "latest_invoice") {
+        return parseDocDate(b.meta?.date) - parseDocDate(a.meta?.date);
+      }
+      if (packingSort === "oldest_invoice") {
+        return parseDocDate(a.meta?.date) - parseDocDate(b.meta?.date);
+      }
+      // default: latest_created
+      return (new Date(b.savedAt || 0).getTime()) - (new Date(a.savedAt || 0).getTime());
+    });
+
+    return list;
+  }, [packingHistory, packingSearchQuery, packingSort, packingDateFilterType, packingDateFrom, packingDateTo]);
 
   const blankRows = Math.max(0, 5 - items.length);
 
@@ -903,7 +1108,13 @@ export default function App() {
       stamp,
       savedAt: new Date().toISOString()
     };
-    list[editingIndex] = data;
+    const { logo: _l, signature: _s, stamp: _st, ...cleanData } = data;
+    const itemToStore = { ...cleanData, savedAt: new Date().toISOString() };
+    if (editingIndex >= 0 && editingIndex < list.length) {
+      list[editingIndex] = itemToStore;
+    } else {
+      list.unshift(itemToStore);
+    }
     localStorage.setItem(_key("easyinvoice_packinghistory"), JSON.stringify(list));
     setPackingHistory(list);
     showToast("Packing List updated!");
@@ -927,7 +1138,13 @@ export default function App() {
       stamp,
       savedAt: new Date().toISOString()
     };
-    list[editingIndex] = data;
+    const { logo: _l, signature: _s, stamp: _st, ...cleanData } = data;
+    const itemToStore = { ...cleanData, savedAt: new Date().toISOString() };
+    if (editingIndex >= 0 && editingIndex < list.length) {
+      list[editingIndex] = itemToStore;
+    } else {
+      list.unshift(itemToStore);
+    }
     localStorage.setItem(_key("easyinvoice_history"), JSON.stringify(list));
     setHistory(list);
     showToast("Invoice updated!");
@@ -937,8 +1154,36 @@ export default function App() {
   // ---------- Load from history ----------
   const loadInvoice = (data) => {
     setSeller(data.seller || seller);
-    setBuyer(data.buyer || buyer);
-    setNotifyParty(data.notifyParty || notifyParty || {});
+    if (data.buyer) {
+      const isBuyerTrn = data.buyer.taxType === "TRN" || (!!data.buyer.trn && !data.buyer.gst);
+      const taxVal = isBuyerTrn ? (data.buyer.trn || data.buyer.gst || "") : (data.buyer.gst || data.buyer.trn || "");
+      setBuyer({
+        name: data.buyer.name || "",
+        addr1: data.buyer.addr1 || "",
+        addr2: data.buyer.addr2 || "",
+        taxType: isBuyerTrn ? "TRN" : "GST",
+        trn: isBuyerTrn ? taxVal : "",
+        gst: isBuyerTrn ? "" : taxVal,
+        pan: data.buyer.pan || "",
+        contact: data.buyer.contact || "",
+        email: data.buyer.email || "",
+      });
+    }
+    if (data.notifyParty) {
+      const isNpTrn = data.notifyParty.taxType === "TRN" || (!!data.notifyParty.trn && !data.notifyParty.gst);
+      const taxVal = isNpTrn ? (data.notifyParty.trn || data.notifyParty.gst || "") : (data.notifyParty.gst || data.notifyParty.trn || "");
+      setNotifyParty({
+        name: data.notifyParty.name || "",
+        addr1: data.notifyParty.addr1 || "",
+        addr2: data.notifyParty.addr2 || "",
+        taxType: isNpTrn ? "TRN" : "GST",
+        trn: isNpTrn ? taxVal : "",
+        gst: isNpTrn ? "" : taxVal,
+        pan: data.notifyParty.pan || "",
+        email: data.notifyParty.email || "",
+        contact: data.notifyParty.contact || "",
+      });
+    }
     setContainers(data.containers || []);
     setMeta(data.meta || meta);
     setBank(data.bank || bank);
@@ -1481,7 +1726,26 @@ export default function App() {
               <div className="quick-field"><label>Transport Type</label><input list="dl-transport" value={quickTransport} onChange={(e) => setQuickTransport(e.target.value)} placeholder="e.g. SEA" /></div>
               <div className="quick-field"><label>Bank Account</label><select value={quickBankIndex} onChange={(e) => setQuickBankIndex(e.target.value)}><option value="">Choose saved bank</option>{dlBanks.map((bankOption, index) => <option key={index} value={index}>{bankOption.bankName} ({bankOption.accNo})</option>)}</select></div>
               <div className="quick-field" style={{ gridColumn: "1 / -1" }}><label>Packing Details</label><textarea value={quickPacking} onChange={(e) => setQuickPacking(e.target.value)} placeholder="Enter packing details" /></div>
-              <div className="quick-field" style={{ gridColumn: "1 / -1" }}><label>Consignee / Buyer</label><select value={quickBuyer.name} onChange={(e) => { const selected = dlCustomers.find((customer) => customer.name === e.target.value); setQuickBuyer(selected ? { name: selected.name || "", addr1: selected.addr1 || "", addr2: selected.addr2 || "", gst: selected.gst || "", pan: selected.pan || "", contact: selected.contact || "", email: selected.email || "" } : { ...quickBuyer, name: e.target.value }); }}><option value="">Choose saved customer</option>{dlCustomers.map((customer, index) => <option key={index} value={customer.name}>{customer.name}</option>)}</select></div>
+              <div className="quick-field" style={{ gridColumn: "1 / -1" }}><label>Consignee / Buyer</label><select value={quickBuyer.name} onChange={(e) => {
+                const selected = dlCustomers.find((customer) => customer.name === e.target.value);
+                if (selected) {
+                  const isTrn = selected.taxType === "TRN" || (!!selected.trn && !selected.gst);
+                  const taxVal = isTrn ? (selected.trn || selected.gst || selected.taxNumber || "") : (selected.gst || selected.trn || selected.taxNumber || "");
+                  setQuickBuyer({
+                    name: selected.name || "",
+                    addr1: selected.addr1 || "",
+                    addr2: selected.addr2 || "",
+                    taxType: isTrn ? "TRN" : "GST",
+                    trn: isTrn ? taxVal : "",
+                    gst: isTrn ? "" : taxVal,
+                    pan: selected.pan || "",
+                    contact: selected.contact || "",
+                    email: selected.email || "",
+                  });
+                } else {
+                  setQuickBuyer({ ...quickBuyer, name: e.target.value });
+                }
+              }}><option value="">Choose saved customer</option>{dlCustomers.map((customer, index) => <option key={index} value={customer.name}>{customer.name}</option>)}</select></div>
             </div>
 
             <div style={{ marginTop: 20, borderTop: "1px solid #ecece8", paddingTop: 16 }}>
@@ -1625,65 +1889,237 @@ export default function App() {
                 </p>
               </div>
             ) : (
-              <div style={{ overflowX: "auto" }}>
-                <div style={{ minWidth: 800 }}>
-                  {/* Column headers */}
-                  <div style={{ display: "grid", gridTemplateColumns: "100px 90px 1.2fr 1fr 1.5fr 80px 100px 150px", gap: 10, padding: "12px 8px", borderBottom: "2px solid #1c1c1c", fontSize: 12, fontWeight: 700, color: "#555" }}>
-                    <div>Date</div>
-                    <div>Transport</div>
-                    <div>Invoice No</div>
-                    <div>Ref No</div>
-                    <div>Buyer Name</div>
-                    <div style={{ textAlign: "right" }}>Qty</div>
-                    <div style={{ textAlign: "right" }}>Value</div>
-                    <div style={{ textAlign: "right" }}>Actions</div>
+              <div>
+                {/* Filter and Sort Toolbar */}
+                <div style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  marginBottom: 20,
+                  padding: "12px 16px",
+                  background: "#f9f9f8",
+                  borderRadius: 10,
+                  border: "1px solid #e5e5e5",
+                  fontSize: 13,
+                }}>
+                  {/* Sort Selection */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 700, color: "#444", fontSize: 12 }}>Sort By:</span>
+                    <select
+                      value={invoiceSort}
+                      onChange={(e) => setInvoiceSort(e.target.value)}
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        border: "1px solid #ccc",
+                        borderRadius: 6,
+                        background: "#fff",
+                        color: "#1c1c1c",
+                        cursor: "pointer",
+                        outline: "none",
+                      }}
+                    >
+                      <option value="latest_created">1. Latest Added Time / Date</option>
+                      <option value="oldest_created">2. Oldest Added Time / Date</option>
+                      <option value="latest_invoice">3. Latest Invoice Date</option>
+                      <option value="oldest_invoice">4. Oldest Invoice Date</option>
+                    </select>
                   </div>
-                  {history
-                    .filter((inv) => {
-                      if (!invoiceSearchQuery) return true;
-                      const q = invoiceSearchQuery.toLowerCase();
-                      const dateStr = inv.savedAt ? new Date(inv.savedAt).toLocaleDateString() : "";
-                      const itemsStr = inv.items?.map(it => it.description || "").join(" ").toLowerCase() || "";
-                      return (
-                        inv.meta?.invoiceNo?.toLowerCase().includes(q) ||
-                        inv.meta?.refNo?.toLowerCase().includes(q) ||
-                        inv.buyer?.name?.toLowerCase().includes(q) ||
-                        inv.meta?.transportType?.toLowerCase().includes(q) ||
-                        dateStr.includes(q) ||
-                        itemsStr.includes(q)
-                      );
-                    })
-                    .map((inv, i) => {
-                    const totalQ = inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0) || 0;
-                    const totalV = inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0) || 0;
-                    return (
-                      <div key={i} style={{ display: "grid", gridTemplateColumns: "100px 90px 1.2fr 1fr 1.5fr 80px 100px 150px", gap: 10, padding: "14px 8px", borderBottom: "1px solid #eee", fontSize: 13, alignItems: "center" }}>
-                        <div style={{ color: "#666" }}>{inv.savedAt ? new Date(inv.savedAt).toLocaleDateString() : ""}</div>
-                        <div style={{ color: "#666" }}>{inv.meta?.transportType || "—"}</div>
-                        <div style={{ fontWeight: 700, color: "#1c1c1c" }}>{inv.meta?.invoiceNo || "—"}</div>
-                        <div style={{ color: "#444" }}>{inv.meta?.refNo || "—"}</div>
-                        <div style={{ color: "#444", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={inv.buyer?.name}>{inv.buyer?.name || "—"}</div>
-                        <div style={{ textAlign: "right", color: "#444" }}>{totalQ ? totalQ.toFixed(2) : "0.00"}</div>
-                        <div style={{ textAlign: "right", fontWeight: 600 }}>{totalV ? totalV.toLocaleString("en-US", { minimumFractionDigits: 2 }) : "0.00"}</div>
-                        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                          <button onClick={() => { loadInvoice(inv); setIsPackingMode(false); setEditingIndex(i); }}
-                            style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }} title="Edit Invoice">✏️ Edit</button>
-                          <button onClick={() => downloadFromHistory(inv)}
-                            style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }} title="Download PDF">⬇️ PDF</button>
-                           <button onClick={() => { 
-                            const pw = prompt("Enter password 'abcd' to delete this invoice:");
-                            if (pw === "abcd") {
-                              deleteHistoryItem(i);
-                            } else if (pw !== null) {
-                              alert("Wrong password!");
-                            }
-                          }}
-                            style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #ffcdd2", borderRadius: 6, background: "#ffe9e9", cursor: "pointer", color: "#b3261e" }} title="Delete">🗑️</button>
-                        </div>
-                      </div>
-                    );
-                  })}
+
+                  {/* Period Filter */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 700, color: "#444", fontSize: 12 }}>Filter Period:</span>
+                    <div style={{ display: "inline-flex", background: "#e5e5e5", borderRadius: 6, padding: 2 }}>
+                      <button
+                        type="button"
+                        onClick={() => setInvoiceDateFilterType("created")}
+                        style={{
+                          border: "none",
+                          padding: "4px 9px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          background: invoiceDateFilterType === "created" ? "#1c1c1c" : "transparent",
+                          color: invoiceDateFilterType === "created" ? "#fff" : "#555",
+                          transition: "all 0.15s ease",
+                        }}
+                      >
+                        Added Date
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setInvoiceDateFilterType("invoice")}
+                        style={{
+                          border: "none",
+                          padding: "4px 9px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          background: invoiceDateFilterType === "invoice" ? "#1c1c1c" : "transparent",
+                          color: invoiceDateFilterType === "invoice" ? "#fff" : "#555",
+                          transition: "all 0.15s ease",
+                        }}
+                      >
+                        Invoice Date
+                      </button>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ fontSize: 11, color: "#666", fontWeight: 600 }}>From</span>
+                      <input
+                        type="date"
+                        value={invoiceDateFrom}
+                        onChange={(e) => setInvoiceDateFrom(e.target.value)}
+                        style={{
+                          padding: "4px 8px",
+                          fontSize: 12,
+                          border: "1px solid #ccc",
+                          borderRadius: 6,
+                          background: "#fff",
+                          outline: "none",
+                          cursor: "pointer",
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ fontSize: 11, color: "#666", fontWeight: 600 }}>To</span>
+                      <input
+                        type="date"
+                        value={invoiceDateTo}
+                        onChange={(e) => setInvoiceDateTo(e.target.value)}
+                        style={{
+                          padding: "4px 8px",
+                          fontSize: 12,
+                          border: "1px solid #ccc",
+                          borderRadius: 6,
+                          background: "#fff",
+                          outline: "none",
+                          cursor: "pointer",
+                        }}
+                      />
+                    </div>
+
+                    {(invoiceDateFrom || invoiceDateTo || invoiceSort !== "latest_created" || invoiceSearchQuery) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInvoiceDateFrom("");
+                          setInvoiceDateTo("");
+                          setInvoiceSort("latest_created");
+                          setInvoiceSearchQuery("");
+                        }}
+                        style={{
+                          border: "1px solid #d4d4d4",
+                          padding: "4px 10px",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          borderRadius: 6,
+                          background: "#fff",
+                          color: "#b3261e",
+                          cursor: "pointer",
+                        }}
+                        title="Clear filters"
+                      >
+                        ✕ Clear Filter
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {processedInvoices.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "40px 0", color: "#888" }}>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
+                    <p style={{ margin: "0 0 12px", fontSize: 14 }}>
+                      No invoices match your search or date filter.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInvoiceDateFrom("");
+                        setInvoiceDateTo("");
+                        setInvoiceSearchQuery("");
+                      }}
+                      style={{
+                        padding: "6px 14px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        border: "1px solid #1c1c1c",
+                        borderRadius: 6,
+                        background: "#fff",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Reset Filters
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <div style={{ minWidth: 920 }}>
+                      {/* Column headers */}
+                      <div style={{ display: "grid", gridTemplateColumns: "115px 105px 85px 1.2fr 0.9fr 1.4fr 75px 95px 150px", gap: 10, padding: "12px 8px", borderBottom: "2px solid #1c1c1c", fontSize: 12, fontWeight: 700, color: "#555" }}>
+                        <div>Created Date</div>
+                        <div>Invoice's Date</div>
+                        <div>Transport</div>
+                        <div>Invoice No</div>
+                        <div>Ref No</div>
+                        <div>Buyer Name</div>
+                        <div style={{ textAlign: "right" }}>Qty</div>
+                        <div style={{ textAlign: "right" }}>Value</div>
+                        <div style={{ textAlign: "right" }}>Actions</div>
+                      </div>
+                      {processedInvoices.map((inv, i) => {
+                        const totalQ = inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0) || 0;
+                        const totalV = inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0) || 0;
+                        return (
+                          <div key={i} style={{ display: "grid", gridTemplateColumns: "115px 105px 85px 1.2fr 0.9fr 1.4fr 75px 95px 150px", gap: 10, padding: "14px 8px", borderBottom: "1px solid #eee", fontSize: 13, alignItems: "center" }}>
+                            <div>
+                              <div style={{ color: "#1c1c1c", fontWeight: 600 }}>{inv.savedAt ? new Date(inv.savedAt).toLocaleDateString() : "—"}</div>
+                              {inv.savedAt && (
+                                <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                                  {new Date(inv.savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ color: "#444", fontWeight: 500 }}>{inv.meta?.date ? (fmtDate(inv.meta.date) || inv.meta.date) : "—"}</div>
+                            <div style={{ color: "#666" }}>{inv.meta?.transportType || "—"}</div>
+                            <div style={{ fontWeight: 700, color: "#1c1c1c" }}>{inv.meta?.invoiceNo || "—"}</div>
+                            <div style={{ color: "#444" }}>{inv.meta?.refNo || "—"}</div>
+                            <div style={{ color: "#444", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={inv.buyer?.name}>{inv.buyer?.name || "—"}</div>
+                            <div style={{ textAlign: "right", color: "#444" }}>{totalQ ? totalQ.toFixed(2) : "0.00"}</div>
+                            <div style={{ textAlign: "right", fontWeight: 600 }}>{totalV ? totalV.toLocaleString("en-US", { minimumFractionDigits: 2 }) : "0.00"}</div>
+                            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                              <button onClick={() => {
+                                const origIdx = history.indexOf(inv);
+                                loadInvoice(inv);
+                                setIsPackingMode(false);
+                                setEditingIndex(origIdx !== -1 ? origIdx : i);
+                              }}
+                                style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }} title="Edit Invoice">✏️ Edit</button>
+                              <button onClick={() => downloadFromHistory(inv)}
+                                style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }} title="Download PDF">⬇️ PDF</button>
+                               <button onClick={() => { 
+                                const pw = prompt("Enter password 'abcd' to delete this invoice:");
+                                if (pw === "abcd") {
+                                  const origIdx = history.indexOf(inv);
+                                  deleteHistoryItem(origIdx !== -1 ? origIdx : i);
+                                } else if (pw !== null) {
+                                  alert("Wrong password!");
+                                }
+                              }}
+                                style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #ffcdd2", borderRadius: 6, background: "#ffe9e9", cursor: "pointer", color: "#b3261e" }} title="Delete">🗑️</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1795,60 +2231,253 @@ export default function App() {
                 </p>
               </div>
             ) : (
-              <div style={{ overflowX: "auto" }}>
-                <div style={{ minWidth: 800 }}>
-                  {/* Column headers */}
-                  <div style={{ display: "grid", gridTemplateColumns: "100px 90px 1.2fr 1fr 1.5fr 110px 150px", gap: 10, padding: "12px 8px", borderBottom: "2px solid #1c1c1c", fontSize: 12, fontWeight: 700, color: "#555" }}>
-                    <div>Date</div>
-                    <div>Transport</div>
-                    <div>Packing Ref No</div>
-                    <div>Ref No</div>
-                    <div>Buyer Name</div>
-                    <div style={{ textAlign: "right" }}>Total Net Wt (MTS)</div>
-                    <div style={{ textAlign: "right" }}>Actions</div>
+              <div>
+                {/* Filter and Sort Toolbar */}
+                <div style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  marginBottom: 20,
+                  padding: "12px 16px",
+                  background: "#f9f9f8",
+                  borderRadius: 10,
+                  border: "1px solid #e5e5e5",
+                  fontSize: 13,
+                }}>
+                  {/* Sort Selection */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 700, color: "#444", fontSize: 12 }}>Sort By:</span>
+                    <select
+                      value={packingSort}
+                      onChange={(e) => setPackingSort(e.target.value)}
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        border: "1px solid #ccc",
+                        borderRadius: 6,
+                        background: "#fff",
+                        color: "#1c1c1c",
+                        cursor: "pointer",
+                        outline: "none",
+                      }}
+                    >
+                      <option value="latest_created">1. Latest Added Time / Date</option>
+                      <option value="oldest_created">2. Oldest Added Time / Date</option>
+                      <option value="latest_invoice">3. Latest Invoice Date</option>
+                      <option value="oldest_invoice">4. Oldest Invoice Date</option>
+                    </select>
                   </div>
-                  {packingHistory
-                    .filter((pack) => {
-                      if (!packingSearchQuery) return true;
-                      const q = packingSearchQuery.toLowerCase();
-                      const dateStr = pack.savedAt ? new Date(pack.savedAt).toLocaleDateString() : "";
-                      const goodsStr = pack.packingItems?.map(it => it.descriptionOfGoods || "").join(" ").toLowerCase() || "";
-                      return (
-                        pack.meta?.invoiceNo?.toLowerCase().includes(q) ||
-                        pack.meta?.refNo?.toLowerCase().includes(q) ||
-                        pack.buyer?.name?.toLowerCase().includes(q) ||
-                        pack.meta?.transportType?.toLowerCase().includes(q) ||
-                        dateStr.includes(q) ||
-                        goodsStr.includes(q)
-                      );
-                    })
-                    .map((pack, i) => {
-                    const totalNet = pack.packingItems?.reduce((s, it) => s + (parseFloat(it.netWeight) || 0), 0) || 0;
-                    return (
-                      <div key={i} style={{ display: "grid", gridTemplateColumns: "100px 90px 1.2fr 1fr 1.5fr 110px 150px", gap: 10, padding: "14px 8px", borderBottom: "1px solid #eee", fontSize: 13, alignItems: "center" }}>
-                        <div style={{ color: "#666" }}>{pack.savedAt ? new Date(pack.savedAt).toLocaleDateString() : ""}</div>
-                        <div style={{ color: "#666" }}>{pack.meta?.transportType || "—"}</div>
-                        <div style={{ fontWeight: 700, color: "#1c1c1c" }}>{pack.meta?.invoiceNo || "—"}</div>
-                        <div style={{ color: "#444" }}>{pack.meta?.refNo || "—"}</div>
-                        <div style={{ color: "#444", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={pack.buyer?.name}>{pack.buyer?.name || "—"}</div>
-                        <div style={{ textAlign: "right", fontWeight: 600 }}>{totalNet ? totalNet.toFixed(3) : "0.000"}</div>
-                        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                          <button onClick={() => {
-                            setSeller(pack.seller || seller);
-                            setBuyer(pack.buyer || buyer);
-                            setNotifyParty(pack.notifyParty || notifyParty || {});
-                            setMeta(pack.meta || meta);
-                            setPackingItems(pack.packingItems || packingItems);
-                            setTitleText(pack.titleText || "PACKING LIST");
-                            if (pack.logo) setLogo(pack.logo);
-                            if (pack.signature) setSignature(pack.signature);
-                            if (pack.stamp) setStamp(pack.stamp);
-                            setShowPackingHistory(false);
-                            setIsPackingMode(true);
-                            setEditingIndex(i);
-                            showToast("Packing list loaded!");
-                          }}
-                            style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }}>✏️ Edit</button>
+
+                  {/* Period Filter */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 700, color: "#444", fontSize: 12 }}>Filter Period:</span>
+                    <div style={{ display: "inline-flex", background: "#e5e5e5", borderRadius: 6, padding: 2 }}>
+                      <button
+                        type="button"
+                        onClick={() => setPackingDateFilterType("created")}
+                        style={{
+                          border: "none",
+                          padding: "4px 9px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          background: packingDateFilterType === "created" ? "#1c1c1c" : "transparent",
+                          color: packingDateFilterType === "created" ? "#fff" : "#555",
+                          transition: "all 0.15s ease",
+                        }}
+                      >
+                        Added Date
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPackingDateFilterType("invoice")}
+                        style={{
+                          border: "none",
+                          padding: "4px 9px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          background: packingDateFilterType === "invoice" ? "#1c1c1c" : "transparent",
+                          color: packingDateFilterType === "invoice" ? "#fff" : "#555",
+                          transition: "all 0.15s ease",
+                        }}
+                      >
+                        Invoice Date
+                      </button>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ fontSize: 11, color: "#666", fontWeight: 600 }}>From</span>
+                      <input
+                        type="date"
+                        value={packingDateFrom}
+                        onChange={(e) => setPackingDateFrom(e.target.value)}
+                        style={{
+                          padding: "4px 8px",
+                          fontSize: 12,
+                          border: "1px solid #ccc",
+                          borderRadius: 6,
+                          background: "#fff",
+                          outline: "none",
+                          cursor: "pointer",
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ fontSize: 11, color: "#666", fontWeight: 600 }}>To</span>
+                      <input
+                        type="date"
+                        value={packingDateTo}
+                        onChange={(e) => setPackingDateTo(e.target.value)}
+                        style={{
+                          padding: "4px 8px",
+                          fontSize: 12,
+                          border: "1px solid #ccc",
+                          borderRadius: 6,
+                          background: "#fff",
+                          outline: "none",
+                          cursor: "pointer",
+                        }}
+                      />
+                    </div>
+
+                    {(packingDateFrom || packingDateTo || packingSort !== "latest_created" || packingSearchQuery) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPackingDateFrom("");
+                          setPackingDateTo("");
+                          setPackingSort("latest_created");
+                          setPackingSearchQuery("");
+                        }}
+                        style={{
+                          border: "1px solid #d4d4d4",
+                          padding: "4px 10px",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          borderRadius: 6,
+                          background: "#fff",
+                          color: "#b3261e",
+                          cursor: "pointer",
+                        }}
+                        title="Clear filters"
+                      >
+                        ✕ Clear Filter
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {processedPacking.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "40px 0", color: "#888" }}>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
+                    <p style={{ margin: "0 0 12px", fontSize: 14 }}>
+                      No packing lists match your search or date filter.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPackingDateFrom("");
+                        setPackingDateTo("");
+                        setPackingSearchQuery("");
+                      }}
+                      style={{
+                        padding: "6px 14px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        border: "1px solid #1c1c1c",
+                        borderRadius: 6,
+                        background: "#fff",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Reset Filters
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <div style={{ minWidth: 920 }}>
+                      {/* Column headers */}
+                      <div style={{ display: "grid", gridTemplateColumns: "115px 105px 85px 1.2fr 0.9fr 1.4fr 115px 150px", gap: 10, padding: "12px 8px", borderBottom: "2px solid #1c1c1c", fontSize: 12, fontWeight: 700, color: "#555" }}>
+                        <div>Created Date</div>
+                        <div>Invoice's Date</div>
+                        <div>Transport</div>
+                        <div>Packing Ref No</div>
+                        <div>Ref No</div>
+                        <div>Buyer Name</div>
+                        <div style={{ textAlign: "right" }}>Total Net Wt (MTS)</div>
+                        <div style={{ textAlign: "right" }}>Actions</div>
+                      </div>
+                      {processedPacking.map((pack, i) => {
+                        const totalNet = pack.packingItems?.reduce((s, it) => s + (parseFloat(it.netWeight) || 0), 0) || 0;
+                        return (
+                          <div key={i} style={{ display: "grid", gridTemplateColumns: "115px 105px 85px 1.2fr 0.9fr 1.4fr 115px 150px", gap: 10, padding: "14px 8px", borderBottom: "1px solid #eee", fontSize: 13, alignItems: "center" }}>
+                            <div>
+                              <div style={{ color: "#1c1c1c", fontWeight: 600 }}>{pack.savedAt ? new Date(pack.savedAt).toLocaleDateString() : "—"}</div>
+                              {pack.savedAt && (
+                                <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                                  {new Date(pack.savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ color: "#444", fontWeight: 500 }}>{pack.meta?.date ? (fmtDate(pack.meta.date) || pack.meta.date) : "—"}</div>
+                            <div style={{ color: "#666" }}>{pack.meta?.transportType || "—"}</div>
+                            <div style={{ fontWeight: 700, color: "#1c1c1c" }}>{pack.meta?.invoiceNo || "—"}</div>
+                            <div style={{ color: "#444" }}>{pack.meta?.refNo || "—"}</div>
+                            <div style={{ color: "#444", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={pack.buyer?.name}>{pack.buyer?.name || "—"}</div>
+                            <div style={{ textAlign: "right", fontWeight: 600 }}>{totalNet ? totalNet.toFixed(3) : "0.000"}</div>
+                            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                              <button onClick={() => {
+                                setSeller(pack.seller || seller);
+                                if (pack.buyer) {
+                                  const isBuyerTrn = pack.buyer.taxType === "TRN" || (!!pack.buyer.trn && !pack.buyer.gst);
+                                  const taxVal = isBuyerTrn ? (pack.buyer.trn || pack.buyer.gst || "") : (pack.buyer.gst || pack.buyer.trn || "");
+                                  setBuyer({
+                                    name: pack.buyer.name || "",
+                                    addr1: pack.buyer.addr1 || "",
+                                    addr2: pack.buyer.addr2 || "",
+                                    taxType: isBuyerTrn ? "TRN" : "GST",
+                                    trn: isBuyerTrn ? taxVal : "",
+                                    gst: isBuyerTrn ? "" : taxVal,
+                                    pan: pack.buyer.pan || "",
+                                    contact: pack.buyer.contact || "",
+                                    email: pack.buyer.email || "",
+                                  });
+                                }
+                                if (pack.notifyParty) {
+                                  const isNpTrn = pack.notifyParty.taxType === "TRN" || (!!pack.notifyParty.trn && !pack.notifyParty.gst);
+                                  const taxVal = isNpTrn ? (pack.notifyParty.trn || pack.notifyParty.gst || "") : (pack.notifyParty.gst || pack.notifyParty.trn || "");
+                                  setNotifyParty({
+                                    name: pack.notifyParty.name || "",
+                                    addr1: pack.notifyParty.addr1 || "",
+                                    addr2: pack.notifyParty.addr2 || "",
+                                    taxType: isNpTrn ? "TRN" : "GST",
+                                    trn: isNpTrn ? taxVal : "",
+                                    gst: isNpTrn ? "" : taxVal,
+                                    pan: pack.notifyParty.pan || "",
+                                    email: pack.notifyParty.email || "",
+                                    contact: pack.notifyParty.contact || "",
+                                  });
+                                }
+                                setMeta(pack.meta || meta);
+                                setPackingItems(pack.packingItems || packingItems);
+                                setTitleText(pack.titleText || "PACKING LIST");
+                                if (pack.logo) setLogo(pack.logo);
+                                if (pack.signature) setSignature(pack.signature);
+                                if (pack.stamp) setStamp(pack.stamp);
+                                setShowPackingHistory(false);
+                                setIsPackingMode(true);
+                                const origIdx = packingHistory.indexOf(pack);
+                                setEditingIndex(origIdx !== -1 ? origIdx : i);
+                                showToast("Packing list loaded!");
+                              }}
+                                style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }}>✏️ Edit</button>
                           <button onClick={() => {
                             const pdfData = {
                               ...pack,
@@ -1874,8 +2503,9 @@ export default function App() {
                           <button onClick={() => {
                             const pw = prompt("Enter password 'abcd' to delete this packing list:");
                             if (pw === "abcd") {
+                              const origIdx = packingHistory.indexOf(pack);
                               const list = loadPackingHistory();
-                              list.splice(i, 1);
+                              list.splice(origIdx !== -1 ? origIdx : i, 1);
                               localStorage.setItem(_key("easyinvoice_packinghistory"), JSON.stringify(list));
                               setPackingHistory(list);
                             } else if (pw !== null) {
@@ -1888,6 +2518,8 @@ export default function App() {
                     );
                   })}
                 </div>
+              </div>
+            )}
               </div>
             )}
           </div>
@@ -2488,15 +3120,21 @@ export default function App() {
 
           <Section title="Buyer / Consignee">
             <CustomerDropdown value={buyer.name} onChange={(v) => setBuyer({ ...buyer, name: v })}
-              onSelect={(c) => setBuyer({
-                name: c.name || "",
-                addr1: c.addr1 || "",
-                addr2: c.addr2 || "",
-                gst: c.gst || "",
-                pan: c.pan || "",
-                contact: c.contact || "",
-                email: c.email || "",
-              })}
+              onSelect={(c) => {
+                const isTrn = c.taxType === "TRN" || (!!c.trn && !c.gst);
+                const taxVal = isTrn ? (c.trn || c.gst || c.taxNumber || "") : (c.gst || c.trn || c.taxNumber || "");
+                setBuyer({
+                  name: c.name || "",
+                  addr1: c.addr1 || "",
+                  addr2: c.addr2 || "",
+                  taxType: isTrn ? "TRN" : "GST",
+                  trn: isTrn ? taxVal : "",
+                  gst: isTrn ? "" : taxVal,
+                  pan: c.pan || "",
+                  contact: c.contact || "",
+                  email: c.email || "",
+                });
+              }}
               onAddNew={() => { const btn = document.querySelector('button[title="Menu"]'); if(btn) btn.click(); setTimeout(() => { document.querySelectorAll('button').forEach(b => { if(b.textContent.includes('Manage Customers')) b.click(); }); }, 100); }} />
             {field("Address line 1", buyer.addr1, (v) =>
               setBuyer({ ...buyer, addr1: v })
@@ -2504,7 +3142,28 @@ export default function App() {
             {field("Address line 2", buyer.addr2, (v) =>
               setBuyer({ ...buyer, addr2: v })
             )}
-            {field("GST", buyer.gst, (v) => setBuyer({ ...buyer, gst: v }))}
+            {taxField(
+              buyer.taxType || (buyer.trn && !buyer.gst ? "TRN" : "GST"),
+              buyer.taxType === "TRN" || (buyer.trn && !buyer.gst) ? (buyer.trn || buyer.gst || "") : (buyer.gst || buyer.trn || ""),
+              (type) => {
+                const currentVal = buyer.trn || buyer.gst || "";
+                setBuyer({
+                  ...buyer,
+                  taxType: type,
+                  trn: type === "TRN" ? currentVal : "",
+                  gst: type === "GST" ? currentVal : "",
+                });
+              },
+              (val) => {
+                const isTrn = (buyer.taxType || (buyer.trn && !buyer.gst ? "TRN" : "GST")) === "TRN";
+                setBuyer({
+                  ...buyer,
+                  taxType: isTrn ? "TRN" : "GST",
+                  trn: isTrn ? val : "",
+                  gst: isTrn ? "" : val,
+                });
+              }
+            )}
             {field("PAN", buyer.pan, (v) => setBuyer({ ...buyer, pan: v }))}
             {field("Contact", buyer.contact, (v) =>
               setBuyer({ ...buyer, contact: v })
@@ -2516,19 +3175,51 @@ export default function App() {
 
           <Section title="Notify Party">
             <CustomerDropdown value={notifyParty.name} onChange={(v) => setNotifyParty({ ...notifyParty, name: v })}
-              onSelect={(c) => setNotifyParty({
-                name: c.name || "",
-                addr1: c.addr1 || "",
-                addr2: c.addr2 || "",
-                email: c.email || "",
-                contact: c.contact || "",
-              })} />
+              onSelect={(c) => {
+                const isTrn = c.taxType === "TRN" || (!!c.trn && !c.gst);
+                const taxVal = isTrn ? (c.trn || c.gst || c.taxNumber || "") : (c.gst || c.trn || c.taxNumber || "");
+                setNotifyParty({
+                  name: c.name || "",
+                  addr1: c.addr1 || "",
+                  addr2: c.addr2 || "",
+                  taxType: isTrn ? "TRN" : "GST",
+                  trn: isTrn ? taxVal : "",
+                  gst: isTrn ? "" : taxVal,
+                  pan: c.pan || "",
+                  email: c.email || "",
+                  contact: c.contact || "",
+                });
+              }}
+              onAddNew={() => { const btn = document.querySelector('button[title="Menu"]'); if(btn) btn.click(); setTimeout(() => { document.querySelectorAll('button').forEach(b => { if(b.textContent.includes('Manage Customers')) b.click(); }); }, 100); }} />
             {field("Address line 1", notifyParty.addr1, (v) =>
               setNotifyParty({ ...notifyParty, addr1: v })
             )}
             {field("Address line 2", notifyParty.addr2, (v) =>
               setNotifyParty({ ...notifyParty, addr2: v })
             )}
+            {taxField(
+              notifyParty.taxType || (notifyParty.trn && !notifyParty.gst ? "TRN" : "GST"),
+              notifyParty.taxType === "TRN" || (notifyParty.trn && !notifyParty.gst) ? (notifyParty.trn || notifyParty.gst || "") : (notifyParty.gst || notifyParty.trn || ""),
+              (type) => {
+                const currentVal = notifyParty.trn || notifyParty.gst || "";
+                setNotifyParty({
+                  ...notifyParty,
+                  taxType: type,
+                  trn: type === "TRN" ? currentVal : "",
+                  gst: type === "GST" ? currentVal : "",
+                });
+              },
+              (val) => {
+                const isTrn = (notifyParty.taxType || (notifyParty.trn && !notifyParty.gst ? "TRN" : "GST")) === "TRN";
+                setNotifyParty({
+                  ...notifyParty,
+                  taxType: isTrn ? "TRN" : "GST",
+                  trn: isTrn ? val : "",
+                  gst: isTrn ? "" : val,
+                });
+              }
+            )}
+            {field("PAN", notifyParty.pan, (v) => setNotifyParty({ ...notifyParty, pan: v }))}
             {field("Email", notifyParty.email, (v) =>
               setNotifyParty({ ...notifyParty, email: v })
             )}
@@ -3178,12 +3869,15 @@ export default function App() {
                           <td style={tdn()}>{buyer.addr2}</td>
                         </tr>
                       )}
-                      {(buyer.gst || buyer.pan) && (
+                      {(buyer.trn || buyer.gst || buyer.pan) && (
                         <tr>
                           <td style={tdn()}>
-                            {buyer.gst && `GST: ${buyer.gst}`}
-                            {buyer.gst && buyer.pan && "     "}
-                            {buyer.pan && `PAN: ${buyer.pan}`}
+                            {[
+                              (buyer.taxType === "TRN" || (buyer.trn && !buyer.gst))
+                                ? (buyer.trn || buyer.gst ? `TRN: ${buyer.trn || buyer.gst}` : "")
+                                : (buyer.gst || buyer.trn ? `GST: ${buyer.gst || buyer.trn}` : ""),
+                              buyer.pan ? `PAN: ${buyer.pan}` : "",
+                            ].filter(Boolean).join("     ")}
                           </td>
                         </tr>
                       )}
@@ -3197,7 +3891,7 @@ export default function App() {
                           <td style={tdn()}>EMAIL : {buyer.email}</td>
                         </tr>
                       )}
-                      {Array.from({ length: Math.max(0, 8 - [buyer.name, buyer.addr1, buyer.addr2, (buyer.gst || buyer.pan), buyer.contact, buyer.email].filter(Boolean).length) }).map((_, i) => (
+                      {Array.from({ length: Math.max(0, 8 - [buyer.name, buyer.addr1, buyer.addr2, (buyer.trn || buyer.gst || buyer.pan), buyer.contact, buyer.email].filter(Boolean).length) }).map((_, i) => (
                         <tr key={`b${i}`}>
                           <td style={tdn()}>&nbsp;</td>
                         </tr>
@@ -3237,6 +3931,18 @@ export default function App() {
                           <td style={tdn()}>{notifyParty.addr2}</td>
                         </tr>
                       )}
+                      {(notifyParty.trn || notifyParty.gst || notifyParty.pan) && (
+                        <tr>
+                          <td style={tdn()}>
+                            {[
+                              (notifyParty.taxType === "TRN" || (notifyParty.trn && !notifyParty.gst))
+                                ? (notifyParty.trn || notifyParty.gst ? `TRN: ${notifyParty.trn || notifyParty.gst}` : "")
+                                : (notifyParty.gst || notifyParty.trn ? `GST: ${notifyParty.gst || notifyParty.trn}` : ""),
+                              notifyParty.pan ? `PAN: ${notifyParty.pan}` : "",
+                            ].filter(Boolean).join("     ")}
+                          </td>
+                        </tr>
+                      )}
                       {notifyParty.email && (
                         <tr>
                           <td style={tdn()}>EMAIL : {notifyParty.email}</td>
@@ -3257,6 +3963,7 @@ export default function App() {
                           notifyParty.name && notifyParty.name !== "—",
                           notifyParty.addr1,
                           notifyParty.addr2,
+                          (notifyParty.trn || notifyParty.gst || notifyParty.pan),
                           notifyParty.email,
                           notifyParty.contact,
                           !Object.values(notifyParty).some((v) => v && v.trim()),

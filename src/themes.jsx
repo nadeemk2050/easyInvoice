@@ -210,6 +210,11 @@ function MontrealInvoicePreview(props) {
                   <div style={{ fontSize: 10.5, whiteSpace: "pre-line" }}>
                     {[notifyParty.addr1, notifyParty.addr2].filter(Boolean).join("\n")}
                   </div>
+                  {(notifyParty.trn || notifyParty.gst || notifyParty.pan) && (
+                    <div style={{ fontSize: 10.5 }}>
+                      {[notifyParty.trn && `TRN: ${notifyParty.trn}`, notifyParty.gst && `GST: ${notifyParty.gst}`, notifyParty.pan && `PAN: ${notifyParty.pan}`].filter(Boolean).join("  ")}
+                    </div>
+                  )}
                   {(notifyParty.contact || notifyParty.email) && (
                     <div style={{ fontSize: 10.5 }}>
                       {[notifyParty.contact, notifyParty.email].filter(Boolean).join(" · ")}
@@ -421,6 +426,11 @@ function MinimalInvoicePreview(props) {
               <div style={{ fontSize: 11, color: "#555", whiteSpace: "pre-line" }}>
                 {[notifyParty.addr1, notifyParty.addr2].filter(Boolean).join("\n")}
               </div>
+              {(notifyParty.trn || notifyParty.gst || notifyParty.pan) && (
+                <div style={{ fontSize: 10, color: "#777", marginTop: 2 }}>
+                  {[notifyParty.trn && `TRN: ${notifyParty.trn}`, notifyParty.gst && `GST: ${notifyParty.gst}`, notifyParty.pan && `PAN: ${notifyParty.pan}`].filter(Boolean).join("  ")}
+                </div>
+              )}
               {(notifyParty.contact || notifyParty.email) && <div style={{ fontSize: 10, color: "#777", marginTop: 2 }}>{[notifyParty.contact, notifyParty.email].filter(Boolean).join(" · ")}</div>}
             </>
           ) : (
@@ -630,6 +640,11 @@ function CorporateInvoicePreview(props) {
                 <>
                   <div style={{ fontWeight: 700 }}>{notifyParty.name}</div>
                   <div style={{ whiteSpace: "pre-line" }}>{[notifyParty.addr1, notifyParty.addr2].filter(Boolean).join("\n")}</div>
+                  {(notifyParty.trn || notifyParty.gst || notifyParty.pan) && (
+                    <div style={{ fontSize: 10, marginTop: 2 }}>
+                      {[notifyParty.trn && `TRN: ${notifyParty.trn}`, notifyParty.gst && `GST: ${notifyParty.gst}`, notifyParty.pan && `PAN: ${notifyParty.pan}`].filter(Boolean).join("  ")}
+                    </div>
+                  )}
                   {(notifyParty.contact || notifyParty.email) && <div style={{ fontSize: 10, marginTop: 2 }}>{[notifyParty.contact, notifyParty.email].filter(Boolean).join(" · ")}</div>}
                 </>
               ) : (
@@ -825,6 +840,8 @@ export async function generateMontrealInvoicePdf(invoiceData) {
     if (notifyParty.name) notifyLines.push({ text: notifyParty.name, bold: true });
     if (notifyParty.addr1) notifyLines.push({ text: notifyParty.addr1, bold: false });
     if (notifyParty.addr2) notifyLines.push({ text: notifyParty.addr2, bold: false });
+    const notifyTax = [notifyParty.trn && `TRN: ${notifyParty.trn}`, notifyParty.gst && `GST: ${notifyParty.gst}`, notifyParty.pan && `PAN: ${notifyParty.pan}`].filter(Boolean).join("  ");
+    if (notifyTax) notifyLines.push({ text: notifyTax, bold: false });
     const notifyContact = [notifyParty.contact, notifyParty.email].filter(Boolean).join(" · ");
     if (notifyContact) notifyLines.push({ text: notifyContact, bold: false });
   } else {
@@ -1109,6 +1126,8 @@ export async function generateMinimalInvoicePdf(invoiceData) {
     if (notifyParty.name) notifyLines.push({ text: notifyParty.name, bold: true });
     if (notifyParty.addr1) notifyLines.push({ text: notifyParty.addr1, bold: false });
     if (notifyParty.addr2) notifyLines.push({ text: notifyParty.addr2, bold: false });
+    const notifyTax = [notifyParty.trn && `TRN: ${notifyParty.trn}`, notifyParty.gst && `GST: ${notifyParty.gst}`, notifyParty.pan && `PAN: ${notifyParty.pan}`].filter(Boolean).join("  ");
+    if (notifyTax) notifyLines.push({ text: notifyTax, bold: false });
     const notifyContact = [notifyParty.contact, notifyParty.email].filter(Boolean).join(" · ");
     if (notifyContact) notifyLines.push({ text: notifyContact, bold: false });
   } else {
@@ -1407,6 +1426,8 @@ export async function generateCorporateInvoicePdf(invoiceData) {
     if (notifyParty.name) notifyLines.push({ text: notifyParty.name, bold: true });
     if (notifyParty.addr1) notifyLines.push({ text: notifyParty.addr1, bold: false });
     if (notifyParty.addr2) notifyLines.push({ text: notifyParty.addr2, bold: false });
+    const notifyTax = [notifyParty.trn && `TRN: ${notifyParty.trn}`, notifyParty.gst && `GST: ${notifyParty.gst}`, notifyParty.pan && `PAN: ${notifyParty.pan}`].filter(Boolean).join("  ");
+    if (notifyTax) notifyLines.push({ text: notifyTax, bold: false });
     const notifyContact = [notifyParty.contact, notifyParty.email].filter(Boolean).join(" · ");
     if (notifyContact) notifyLines.push({ text: notifyContact, bold: false });
   } else {

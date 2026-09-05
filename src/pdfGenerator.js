@@ -475,7 +475,11 @@ export async function generateInvoicePdf(invoiceData) {
   if (buyer.addr2) buyerLines.push({ text: buyer.addr2 });
   
   let gstPanParts = [];
-  if (buyer.gst) gstPanParts.push(`GST: ${buyer.gst}`);
+  if (buyer.trn || (buyer.taxType === "TRN" && buyer.gst)) {
+    gstPanParts.push(`TRN: ${buyer.trn || buyer.gst}`);
+  } else if (buyer.gst || (buyer.taxType === "GST" && buyer.trn)) {
+    gstPanParts.push(`GST: ${buyer.gst || buyer.trn}`);
+  }
   if (buyer.pan) gstPanParts.push(`PAN: ${buyer.pan}`);
   if (gstPanParts.length > 0) {
     buyerLines.push({ text: gstPanParts.join("     ") });
@@ -493,6 +497,16 @@ export async function generateInvoicePdf(invoiceData) {
   }
   if (notifyParty.addr1) notifyLines.push({ text: notifyParty.addr1 });
   if (notifyParty.addr2) notifyLines.push({ text: notifyParty.addr2 });
+  let notifyTaxParts = [];
+  if (notifyParty.trn || (notifyParty.taxType === "TRN" && notifyParty.gst)) {
+    notifyTaxParts.push(`TRN: ${notifyParty.trn || notifyParty.gst}`);
+  } else if (notifyParty.gst || (notifyParty.taxType === "GST" && notifyParty.trn)) {
+    notifyTaxParts.push(`GST: ${notifyParty.gst || notifyParty.trn}`);
+  }
+  if (notifyParty.pan) notifyTaxParts.push(`PAN: ${notifyParty.pan}`);
+  if (notifyTaxParts.length > 0) {
+    notifyLines.push({ text: notifyTaxParts.join("     ") });
+  }
   if (notifyParty.email) notifyLines.push({ text: `EMAIL : ${notifyParty.email}` });
   if (notifyParty.contact) notifyLines.push({ text: `CONTACT : ${notifyParty.contact}` });
   if (notifyLines.length === 1) {
@@ -1116,7 +1130,11 @@ export async function generatePackingListPdf(packingData) {
   if (buyer.addr2) buyerLines.push({ text: buyer.addr2 });
   
   let gstPanParts = [];
-  if (buyer.gst) gstPanParts.push(`GST: ${buyer.gst}`);
+  if (buyer.trn || (buyer.taxType === "TRN" && buyer.gst)) {
+    gstPanParts.push(`TRN: ${buyer.trn || buyer.gst}`);
+  } else if (buyer.gst || (buyer.taxType === "GST" && buyer.trn)) {
+    gstPanParts.push(`GST: ${buyer.gst || buyer.trn}`);
+  }
   if (buyer.pan) gstPanParts.push(`PAN: ${buyer.pan}`);
   if (gstPanParts.length > 0) {
     buyerLines.push({ text: gstPanParts.join("     ") });
@@ -1134,6 +1152,16 @@ export async function generatePackingListPdf(packingData) {
   }
   if (notifyParty.addr1) notifyLines.push({ text: notifyParty.addr1 });
   if (notifyParty.addr2) notifyLines.push({ text: notifyParty.addr2 });
+  let notifyTaxParts = [];
+  if (notifyParty.trn || (notifyParty.taxType === "TRN" && notifyParty.gst)) {
+    notifyTaxParts.push(`TRN: ${notifyParty.trn || notifyParty.gst}`);
+  } else if (notifyParty.gst || (notifyParty.taxType === "GST" && notifyParty.trn)) {
+    notifyTaxParts.push(`GST: ${notifyParty.gst || notifyParty.trn}`);
+  }
+  if (notifyParty.pan) notifyTaxParts.push(`PAN: ${notifyParty.pan}`);
+  if (notifyTaxParts.length > 0) {
+    notifyLines.push({ text: notifyTaxParts.join("     ") });
+  }
   if (notifyParty.email) notifyLines.push({ text: `EMAIL : ${notifyParty.email}` });
   if (notifyParty.contact) notifyLines.push({ text: `CONTACT : ${notifyParty.contact}` });
 
