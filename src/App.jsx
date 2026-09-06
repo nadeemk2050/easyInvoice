@@ -523,6 +523,14 @@ export default function App() {
   const [invoiceDateFrom, setInvoiceDateFrom] = useState("");
   const [invoiceDateTo, setInvoiceDateTo] = useState("");
 
+  const [selectedInvoiceKeys, setSelectedInvoiceKeys] = useState([]);
+  const [hiddenInvoiceKeys, setHiddenInvoiceKeys] = useState([]);
+  const [filterSelectedOnly, setFilterSelectedOnly] = useState(false);
+  const [showDetailMode, setShowDetailMode] = useState(false);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [bulkDeletePassword, setBulkDeletePassword] = useState("");
+  const [bulkDeleteError, setBulkDeleteError] = useState("");
+
   const [packingSearchQuery, setPackingSearchQuery] = useState("");
   const [showPackingSearch, setShowPackingSearch] = useState(false);
   const [packingSort, setPackingSort] = useState("latest_created");
@@ -809,8 +817,18 @@ export default function App() {
     return !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : clean;
   };
 
+  const getInvKey = (inv, idx) => (inv?.savedAt ? `${inv.savedAt}_${inv.meta?.invoiceNo || ""}_${idx}` : `inv_${idx}`);
+
   const processedInvoices = useMemo(() => {
-    let list = [...history];
+    let list = history.map((inv, idx) => ({ ...inv, _key: getInvKey(inv, idx), _origIdx: idx }));
+
+    if (hiddenInvoiceKeys.length > 0) {
+      list = list.filter((inv) => !hiddenInvoiceKeys.includes(inv._key));
+    }
+
+    if (filterSelectedOnly) {
+      list = list.filter((inv) => selectedInvoiceKeys.includes(inv._key));
+    }
 
     if (invoiceSearchQuery) {
       const q = invoiceSearchQuery.toLowerCase();
@@ -857,7 +875,7 @@ export default function App() {
     });
 
     return list;
-  }, [history, invoiceSearchQuery, invoiceSort, invoiceDateFilterType, invoiceDateFrom, invoiceDateTo]);
+  }, [history, hiddenInvoiceKeys, filterSelectedOnly, selectedInvoiceKeys, invoiceSearchQuery, invoiceSort, invoiceDateFilterType, invoiceDateFrom, invoiceDateTo]);
 
   const processedPacking = useMemo(() => {
     let list = [...packingHistory];
@@ -1228,6 +1246,52 @@ export default function App() {
     };
     await activeInvoiceTheme.pdf(pdfData);
     showToast("PDF downloaded!");
+  };
+
+  const isAllSelected = processedInvoices.length > 0 && processedInvoices.every((inv) => selectedInvoiceKeys.includes(inv._key));
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      const currentKeys = processedInvoices.map((inv) => inv._key);
+      setSelectedInvoiceKeys((prev) => prev.filter((k) => !currentKeys.includes(k)));
+    } else {
+      const currentKeys = processedInvoices.map((inv) => inv._key);
+      setSelectedInvoiceKeys((prev) => Array.from(new Set([...prev, ...currentKeys])));
+    }
+  };
+
+  const toggleSelectInvoice = (key) => {
+    setSelectedInvoiceKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  };
+
+  const handleHideSelected = () => {
+    const count = selectedInvoiceKeys.length;
+    setHiddenInvoiceKeys((prev) => Array.from(new Set([...prev, ...selectedInvoiceKeys])));
+    setSelectedInvoiceKeys([]);
+    setFilterSelectedOnly(false);
+    showToast(`${count} invoice(s) hidden from view`);
+  };
+
+  const handleOpenBulkDelete = () => {
+    setBulkDeletePassword("");
+    setBulkDeleteError("");
+    setShowBulkDeleteModal(true);
+  };
+
+  const handleConfirmBulkDelete = () => {
+    if (bulkDeletePassword.trim() !== "ABCD ALL") {
+      setBulkDeleteError("Incorrect password! You must enter exact password 'ABCD ALL'");
+      return;
+    }
+    const list = loadHistory();
+    const remaining = list.filter((inv, idx) => !selectedInvoiceKeys.includes(getInvKey(inv, idx)));
+    localStorage.setItem(_key("easyinvoice_history"), JSON.stringify(remaining));
+    setHistory(remaining);
+    const count = selectedInvoiceKeys.length;
+    setSelectedInvoiceKeys([]);
+    setShowBulkDeleteModal(false);
+    setFilterSelectedOnly(false);
+    showToast(`Successfully removed ${count} invoice(s)!`);
   };
 
   // ---------- Auth effect (must be after all hooks) ----------
@@ -1787,9 +1851,12 @@ export default function App() {
       {!quickEntryMode && showHistory && (
         <div
           style={{
-            maxWidth: 1200,
-            margin: "0 auto",
-            padding: "40px 20px",
+            width: "100%",
+            minHeight: "100vh",
+            boxSizing: "border-box",
+            padding: "24px 28px 40px",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
           {/* Header */}
@@ -1798,7 +1865,7 @@ export default function App() {
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              marginBottom: 28,
+              marginBottom: 24,
             }}
           >
             <div>
@@ -1846,6 +1913,30 @@ export default function App() {
                 🔍
               </button>
               <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} onDataChange={() => setSyncCounter((c) => c + 1)} />
+              <button
+                onClick={() => setShowDetailMode((prev) => !prev)}
+                style={{
+                  padding: "9px 14px",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  border: showDetailMode ? "1px solid #1c1c1c" : "1px solid #d4d4d4",
+                  borderRadius: 8,
+                  background: showDetailMode ? "#1c1c1c" : "#fff",
+                  color: showDetailMode ? "#fff" : "#1c1c1c",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  transition: "all 0.15s ease",
+                }}
+                title="Toggle inline line-item details (Item Description, Quantity, Rate, Amount)"
+              >
+                <span>📑</span>
+                <span>DTL</span>
+                <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 4, fontWeight: 800, background: showDetailMode ? "#fff" : "#f0f0f0", color: showDetailMode ? "#1c1c1c" : "#666" }}>
+                  {showDetailMode ? "ON" : "OFF"}
+                </span>
+              </button>
               <button onClick={openQuickEntry} style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, border: "1px solid #1a4fa0", borderRadius: 8, background: "#eef4ff", color: "#1a4fa0", cursor: "pointer" }}>⚡ Quick Entry</button>
               <button
                 onClick={() => {
@@ -1876,8 +1967,13 @@ export default function App() {
             style={{
               background: "#fff",
               borderRadius: 12,
-              padding: 28,
+              padding: "24px 28px",
               boxShadow: "0 4px 20px rgba(0,0,0,0.05)",
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              boxSizing: "border-box",
+              width: "100%",
             }}
           >
             {activeOpts !== null && <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={() => setActiveOpts(null)} />}
@@ -1889,7 +1985,7 @@ export default function App() {
                 </p>
               </div>
             ) : (
-              <div>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
                 {/* Filter and Sort Toolbar */}
                 <div style={{
                   display: "flex",
@@ -2005,29 +2101,55 @@ export default function App() {
                       />
                     </div>
 
-                    {(invoiceDateFrom || invoiceDateTo || invoiceSort !== "latest_created" || invoiceSearchQuery) && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setInvoiceDateFrom("");
-                          setInvoiceDateTo("");
-                          setInvoiceSort("latest_created");
-                          setInvoiceSearchQuery("");
-                        }}
-                        style={{
-                          border: "1px solid #d4d4d4",
-                          padding: "4px 10px",
-                          fontSize: 11,
-                          fontWeight: 600,
-                          borderRadius: 6,
-                          background: "#fff",
-                          color: "#b3261e",
-                          cursor: "pointer",
-                        }}
-                        title="Clear filters"
-                      >
-                        ✕ Clear Filter
-                      </button>
+                    {(invoiceDateFrom || invoiceDateTo || invoiceSort !== "latest_created" || invoiceSearchQuery || filterSelectedOnly || hiddenInvoiceKeys.length > 0) && (
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        {hiddenInvoiceKeys.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setHiddenInvoiceKeys([]);
+                              showToast("All hidden invoices restored");
+                            }}
+                            style={{
+                              border: "1px solid #1a4fa0",
+                              padding: "4px 10px",
+                              fontSize: 11,
+                              fontWeight: 700,
+                              borderRadius: 6,
+                              background: "#eef4ff",
+                              color: "#1a4fa0",
+                              cursor: "pointer",
+                            }}
+                            title="Unhide all hidden invoices"
+                          >
+                            👁️ Unhide All ({hiddenInvoiceKeys.length})
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInvoiceDateFrom("");
+                            setInvoiceDateTo("");
+                            setInvoiceSort("latest_created");
+                            setInvoiceSearchQuery("");
+                            setFilterSelectedOnly(false);
+                            setHiddenInvoiceKeys([]);
+                          }}
+                          style={{
+                            border: "1px solid #d4d4d4",
+                            padding: "4px 10px",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            borderRadius: 6,
+                            background: "#fff",
+                            color: "#b3261e",
+                            cursor: "pointer",
+                          }}
+                          title="Clear filters"
+                        >
+                          ✕ Clear Filter
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -2036,7 +2158,7 @@ export default function App() {
                   <div style={{ textAlign: "center", padding: "40px 0", color: "#888" }}>
                     <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
                     <p style={{ margin: "0 0 12px", fontSize: 14 }}>
-                      No invoices match your search or date filter.
+                      {filterSelectedOnly ? "No invoices currently selected to show." : "No invoices match your search or date filter."}
                     </p>
                     <button
                       type="button"
@@ -2044,6 +2166,8 @@ export default function App() {
                         setInvoiceDateFrom("");
                         setInvoiceDateTo("");
                         setInvoiceSearchQuery("");
+                        setFilterSelectedOnly(false);
+                        setHiddenInvoiceKeys([]);
                       }}
                       style={{
                         padding: "6px 14px",
@@ -2059,70 +2183,463 @@ export default function App() {
                     </button>
                   </div>
                 ) : (
-                  <div style={{ overflowX: "auto" }}>
-                    <div style={{ minWidth: 920 }}>
-                      {/* Column headers */}
-                      <div style={{ display: "grid", gridTemplateColumns: "115px 105px 85px 1.2fr 0.9fr 1.4fr 75px 95px 150px", gap: 10, padding: "12px 8px", borderBottom: "2px solid #1c1c1c", fontSize: 12, fontWeight: 700, color: "#555" }}>
-                        <div>Created Date</div>
-                        <div>Invoice's Date</div>
-                        <div>Transport</div>
-                        <div>Invoice No</div>
-                        <div>Ref No</div>
-                        <div>Buyer Name</div>
-                        <div style={{ textAlign: "right" }}>Qty</div>
-                        <div style={{ textAlign: "right" }}>Value</div>
-                        <div style={{ textAlign: "right" }}>Actions</div>
-                      </div>
-                      {processedInvoices.map((inv, i) => {
-                        const totalQ = inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0) || 0;
-                        const totalV = inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0) || 0;
-                        return (
-                          <div key={i} style={{ display: "grid", gridTemplateColumns: "115px 105px 85px 1.2fr 0.9fr 1.4fr 75px 95px 150px", gap: 10, padding: "14px 8px", borderBottom: "1px solid #eee", fontSize: 13, alignItems: "center" }}>
-                            <div>
-                              <div style={{ color: "#1c1c1c", fontWeight: 600 }}>{inv.savedAt ? new Date(inv.savedAt).toLocaleDateString() : "—"}</div>
-                              {inv.savedAt && (
-                                <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
-                                  {new Date(inv.savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}
-                                </div>
-                              )}
+                  <div style={{ overflowX: "auto", width: "100%" }}>
+                    {(() => {
+                      const isSelectionActive = selectedInvoiceKeys.length > 0;
+                      const targetInvoicesForSummary = isSelectionActive
+                        ? processedInvoices.filter((inv) => selectedInvoiceKeys.includes(inv._key))
+                        : processedInvoices;
+
+                      const sumQty = targetInvoicesForSummary.reduce((sum, inv) => sum + (inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0) || 0), 0);
+                      const sumValue = targetInvoicesForSummary.reduce((sum, inv) => sum + (inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0) || 0), 0);
+                      const sumVat = targetInvoicesForSummary.reduce((sum, inv) => {
+                        const v = inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0) || 0;
+                        const pct = parseFloat(inv.vatPercent) || 0;
+                        return sum + (v * pct) / 100;
+                      }, 0);
+                      const sumTotalValue = sumValue + sumVat;
+                      const gridCols = "38px 115px 105px 80px 1.1fr 0.9fr 1.3fr 75px 95px 90px 105px 145px";
+
+                      return (
+                        <div style={{ minWidth: 1180 }}>
+                          {/* Column headers */}
+                          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 10, padding: "12px 8px", borderBottom: "2px solid #1c1c1c", fontSize: 12, fontWeight: 700, color: "#555", alignItems: "center" }}>
+                            <div style={{ display: "flex", justifyContent: "center", alignItems: "center" }}>
+                              <input
+                                type="checkbox"
+                                checked={isAllSelected}
+                                onChange={toggleSelectAll}
+                                title={isAllSelected ? "Deselect all" : "Select all"}
+                                style={{ width: 17, height: 17, cursor: "pointer", accentColor: "#1c1c1c" }}
+                              />
                             </div>
-                            <div style={{ color: "#444", fontWeight: 500 }}>{inv.meta?.date ? (fmtDate(inv.meta.date) || inv.meta.date) : "—"}</div>
-                            <div style={{ color: "#666" }}>{inv.meta?.transportType || "—"}</div>
-                            <div style={{ fontWeight: 700, color: "#1c1c1c" }}>{inv.meta?.invoiceNo || "—"}</div>
-                            <div style={{ color: "#444" }}>{inv.meta?.refNo || "—"}</div>
-                            <div style={{ color: "#444", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={inv.buyer?.name}>{inv.buyer?.name || "—"}</div>
-                            <div style={{ textAlign: "right", color: "#444" }}>{totalQ ? totalQ.toFixed(2) : "0.00"}</div>
-                            <div style={{ textAlign: "right", fontWeight: 600 }}>{totalV ? totalV.toLocaleString("en-US", { minimumFractionDigits: 2 }) : "0.00"}</div>
-                            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                              <button onClick={() => {
-                                const origIdx = history.indexOf(inv);
-                                loadInvoice(inv);
-                                setIsPackingMode(false);
-                                setEditingIndex(origIdx !== -1 ? origIdx : i);
-                              }}
-                                style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }} title="Edit Invoice">✏️ Edit</button>
-                              <button onClick={() => downloadFromHistory(inv)}
-                                style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }} title="Download PDF">⬇️ PDF</button>
-                               <button onClick={() => { 
-                                const pw = prompt("Enter password 'abcd' to delete this invoice:");
-                                if (pw === "abcd") {
-                                  const origIdx = history.indexOf(inv);
-                                  deleteHistoryItem(origIdx !== -1 ? origIdx : i);
-                                } else if (pw !== null) {
-                                  alert("Wrong password!");
-                                }
-                              }}
-                                style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #ffcdd2", borderRadius: 6, background: "#ffe9e9", cursor: "pointer", color: "#b3261e" }} title="Delete">🗑️</button>
-                            </div>
+                            <div>Created Date</div>
+                            <div>Invoice's Date</div>
+                            <div>Transport</div>
+                            <div>Invoice No</div>
+                            <div>Ref No</div>
+                            <div>Buyer Name</div>
+                            <div style={{ textAlign: "right" }}>Qty</div>
+                            <div style={{ textAlign: "right" }}>Value</div>
+                            <div style={{ textAlign: "right" }}>VAT</div>
+                            <div style={{ textAlign: "right" }}>Total Value</div>
+                            <div style={{ textAlign: "right" }}>Actions</div>
                           </div>
-                        );
-                      })}
-                    </div>
+
+                          {/* Summary / Total Row (Top) */}
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: gridCols,
+                              gap: 10,
+                              padding: "11px 8px",
+                              borderBottom: isSelectionActive ? "2px solid #1a4fa0" : "2px solid #e0e0e0",
+                              background: isSelectionActive ? "#edf4ff" : "#f5f8ff",
+                              fontSize: 13,
+                              fontWeight: 800,
+                              alignItems: "center",
+                              color: "#1a4fa0",
+                              transition: "background 0.2s ease, border 0.2s ease",
+                            }}
+                          >
+                            <div></div>
+                            <div style={{ gridColumn: "span 6", letterSpacing: "0.2px", display: "flex", alignItems: "center", gap: 6 }}>
+                              <span>{isSelectionActive ? "🎯" : "📊"}</span>
+                              <span>
+                                {isSelectionActive
+                                  ? `SELECTED TOTALS (${targetInvoicesForSummary.length} Selected)`
+                                  : `TOTALS (${processedInvoices.length} ${processedInvoices.length === 1 ? "Invoice" : "Invoices"})`}
+                              </span>
+                            </div>
+                            <div style={{ textAlign: "right", color: "#1a4fa0", fontWeight: 800 }}>{sumQty.toFixed(2)}</div>
+                            <div style={{ textAlign: "right", color: "#1a4fa0", fontWeight: 800 }}>{sumValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                            <div style={{ textAlign: "right", color: "#1a4fa0", fontWeight: 800 }}>{sumVat.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                            <div style={{ textAlign: "right", color: "#1a4fa0", fontWeight: 900 }}>{sumTotalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                            <div></div>
+                          </div>
+
+                          {/* Invoice Rows */}
+                          {processedInvoices.map((inv, i) => {
+                            const totalQ = inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0) || 0;
+                            const totalV = inv.items?.reduce((s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0), 0) || 0;
+                            const vatPct = parseFloat(inv.vatPercent) || 0;
+                            const vatAmount = (totalV * vatPct) / 100;
+                            const totalValue = totalV + vatAmount;
+                            const isSelected = selectedInvoiceKeys.includes(inv._key);
+
+                            return (
+                              <div
+                                key={inv._key || i}
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: gridCols,
+                                  gap: 10,
+                                  padding: "13px 8px",
+                                  borderBottom: "1px solid #eee",
+                                  fontSize: 13,
+                                  alignItems: "center",
+                                  background: isSelected ? "#f9fbff" : "transparent",
+                                  transition: "background 0.15s ease",
+                                }}
+                              >
+                                <div style={{ display: "flex", justifyContent: "center", alignItems: "center" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleSelectInvoice(inv._key)}
+                                    style={{ width: 17, height: 17, cursor: "pointer", accentColor: "#1a4fa0" }}
+                                  />
+                                </div>
+                                <div>
+                                  <div style={{ color: "#1c1c1c", fontWeight: 600 }}>{inv.savedAt ? new Date(inv.savedAt).toLocaleDateString() : "—"}</div>
+                                  {inv.savedAt && (
+                                    <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                                      {new Date(inv.savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}
+                                    </div>
+                                  )}
+                                </div>
+                                <div style={{ color: "#444", fontWeight: 500 }}>{inv.meta?.date ? (fmtDate(inv.meta.date) || inv.meta.date) : "—"}</div>
+                                <div style={{ color: "#666" }}>{inv.meta?.transportType || "—"}</div>
+                                <div style={{ fontWeight: 700, color: "#1c1c1c" }}>{inv.meta?.invoiceNo || "—"}</div>
+                                <div style={{ color: "#444" }}>{inv.meta?.refNo || "—"}</div>
+                                <div style={{ color: "#444", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={inv.buyer?.name}>{inv.buyer?.name || "—"}</div>
+                                <div style={{ textAlign: "right", color: "#444" }}>{totalQ ? totalQ.toFixed(2) : "0.00"}</div>
+                                <div style={{ textAlign: "right", fontWeight: 500, color: "#444" }}>{totalV ? totalV.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}</div>
+                                <div style={{ textAlign: "right", color: vatAmount ? "#1c1c1c" : "#888" }}>
+                                  <div>{vatAmount ? vatAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}</div>
+                                  {vatPct > 0 && <div style={{ fontSize: 10, color: "#888" }}>({vatPct}%)</div>}
+                                </div>
+                                <div style={{ textAlign: "right", fontWeight: 700, color: "#1c1c1c" }}>{totalValue ? totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}</div>
+                                <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                                  <button
+                                    onClick={() => {
+                                      const origIdx = inv._origIdx ?? history.indexOf(inv);
+                                      loadInvoice(inv);
+                                      setIsPackingMode(false);
+                                      setEditingIndex(origIdx !== -1 ? origIdx : i);
+                                    }}
+                                    style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }}
+                                    title="Edit Invoice"
+                                  >
+                                    ✏️ Edit
+                                  </button>
+                                  <button
+                                    onClick={() => downloadFromHistory(inv)}
+                                    style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d4d4d4", borderRadius: 6, background: "#fff", cursor: "pointer" }}
+                                    title="Download PDF"
+                                  >
+                                    ⬇️ PDF
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      const pw = prompt("Enter password 'abcd' to delete this invoice:");
+                                      if (pw === "abcd") {
+                                        const origIdx = inv._origIdx ?? history.indexOf(inv);
+                                        deleteHistoryItem(origIdx !== -1 ? origIdx : i);
+                                      } else if (pw !== null) {
+                                        alert("Wrong password!");
+                                      }
+                                    }}
+                                    style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #ffcdd2", borderRadius: 6, background: "#ffe9e9", cursor: "pointer", color: "#b3261e" }}
+                                    title="Delete"
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+
+                                {showDetailMode && inv.items && inv.items.length > 0 && (
+                                  <div
+                                    style={{
+                                      gridColumn: "1 / -1",
+                                      background: "#f8fafc",
+                                      borderRadius: 8,
+                                      padding: "10px 14px",
+                                      margin: "6px 0 2px 38px",
+                                      border: "1px solid #e2e8f0",
+                                    }}
+                                  >
+                                    <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                      <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                        <span>📦</span>
+                                        <span>ITEM DETAILS ({inv.items.length} {inv.items.length === 1 ? "Item" : "Items"})</span>
+                                      </span>
+                                      <span style={{ fontSize: 11, color: "#64748b" }}>Qty × Rate (RT) = Amount</span>
+                                    </div>
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                                      {inv.items.map((it, itIdx) => {
+                                        const itQ = parseFloat(it.qty) || 0;
+                                        const itR = parseFloat(it.rate) || 0;
+                                        const itAmt = itQ * itR;
+                                        return (
+                                          <div
+                                            key={itIdx}
+                                            style={{
+                                              display: "grid",
+                                              gridTemplateColumns: "2fr 130px 140px 140px",
+                                              gap: 10,
+                                              fontSize: 12.5,
+                                              padding: "6px 12px",
+                                              background: "#fff",
+                                              borderRadius: 6,
+                                              border: "1px solid #edf2f7",
+                                              alignItems: "center",
+                                            }}
+                                          >
+                                            <div style={{ fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={it.description}>
+                                              <span style={{ color: "#94a3b8", marginRight: 6, fontSize: 11 }}>#{itIdx + 1}</span>
+                                              {it.description || "—"}
+                                            </div>
+                                            <div style={{ color: "#475569" }}>
+                                              <span style={{ fontSize: 11, color: "#94a3b8", marginRight: 4 }}>Qty:</span>
+                                              <strong>{itQ ? itQ.toFixed(2) : "0.00"}</strong> <span style={{ fontSize: 11, color: "#888" }}>{it.per || ""}</span>
+                                            </div>
+                                            <div style={{ color: "#475569" }}>
+                                              <span style={{ fontSize: 11, color: "#94a3b8", marginRight: 4 }}>RT:</span>
+                                              <strong>{itR ? itR.toLocaleString("en-US", { minimumFractionDigits: 2 }) : "0.00"}</strong> <span style={{ fontSize: 11, color: "#888" }}>{it.per ? `/ ${it.per}` : ""}</span>
+                                            </div>
+                                            <div style={{ textAlign: "right", fontWeight: 700, color: "#1a4fa0" }}>
+                                              <span style={{ fontSize: 11, color: "#94a3b8", marginRight: 4, fontWeight: 500 }}>Amount:</span>
+                                              {itAmt ? itAmt.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
             )}
           </div>
+
+          {/* Floating Bulk Action Toolbar */}
+          {selectedInvoiceKeys.length > 0 && (
+            <div
+              style={{
+                position: "fixed",
+                bottom: 28,
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 3500,
+                background: "#1c1c1c",
+                color: "#fff",
+                borderRadius: 14,
+                padding: "10px 18px",
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+                animation: "slideUp 0.25s ease",
+                border: "1px solid rgba(255,255,255,0.15)",
+                flexWrap: "wrap",
+                maxWidth: "92vw",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8, paddingRight: 6, borderRight: "1px solid rgba(255,255,255,0.2)" }}>
+                <span style={{ background: "#1a4fa0", color: "#fff", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 800 }}>
+                  {selectedInvoiceKeys.length}
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>Selected</span>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => setFilterSelectedOnly(!filterSelectedOnly)}
+                  style={{
+                    padding: "7px 14px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    background: filterSelectedOnly ? "#1a4fa0" : "#333",
+                    color: "#fff",
+                    border: filterSelectedOnly ? "1px solid #60a5fa" : "1px solid #444",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                  }}
+                  title="Filter view to only selected invoices"
+                >
+                  🔍 {filterSelectedOnly ? "Show All" : "Filter"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleHideSelected}
+                  style={{
+                    padding: "7px 14px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    background: "#333",
+                    color: "#fff",
+                    border: "1px solid #444",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                  }}
+                  title="Hide selected invoices from view"
+                >
+                  👁️ Hide
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenBulkDelete}
+                  style={{
+                    padding: "7px 14px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    background: "#dc2626",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                  }}
+                  title="Permanently remove selected invoices"
+                >
+                  🗑️ Remove
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedInvoiceKeys([]);
+                    setFilterSelectedOnly(false);
+                  }}
+                  style={{
+                    padding: "6px 10px",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    background: "transparent",
+                    color: "#bbb",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                  title="Deselect All"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Bulk Remove Password Modal */}
+          {showBulkDeleteModal && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.6)",
+                zIndex: 5000,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 16,
+              }}
+              onClick={() => setShowBulkDeleteModal(false)}
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  background: "#fff",
+                  borderRadius: 14,
+                  padding: "26px 28px",
+                  maxWidth: 440,
+                  width: "100%",
+                  boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                  <div style={{ fontSize: 26 }}>⚠️</div>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#b3261e" }}>
+                    Delete {selectedInvoiceKeys.length} Selected Invoice(s)?
+                  </h3>
+                </div>
+                <p style={{ fontSize: 13.5, color: "#555", margin: "0 0 16px", lineHeight: 1.5 }}>
+                  This action cannot be undone. To confirm permanent deletion of all selected invoices, please enter the security password <strong>ABCD ALL</strong> below:
+                </p>
+
+                <div style={{ marginBottom: 16 }}>
+                  <input
+                    type="text"
+                    placeholder="Enter password: ABCD ALL"
+                    value={bulkDeletePassword}
+                    onChange={(e) => {
+                      setBulkDeletePassword(e.target.value);
+                      setBulkDeleteError("");
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleConfirmBulkDelete();
+                    }}
+                    autoFocus
+                    style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      padding: "10px 12px",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      border: bulkDeleteError ? "2px solid #b3261e" : "1px solid #1c1c1c",
+                      borderRadius: 8,
+                      outline: "none",
+                      letterSpacing: "0.5px",
+                    }}
+                  />
+                  {bulkDeleteError && (
+                    <div style={{ color: "#b3261e", fontSize: 12, fontWeight: 600, marginTop: 6 }}>
+                      {bulkDeleteError}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowBulkDeleteModal(false)}
+                    style={{
+                      padding: "9px 16px",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      border: "1px solid #d4d4d4",
+                      borderRadius: 7,
+                      background: "#fff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmBulkDelete}
+                    style={{
+                      padding: "9px 18px",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      border: "none",
+                      borderRadius: 7,
+                      background: "#b3261e",
+                      color: "#fff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Confirm Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
