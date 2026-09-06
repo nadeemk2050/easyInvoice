@@ -522,6 +522,7 @@ export default function App() {
   const [invoiceDateFilterType, setInvoiceDateFilterType] = useState("created");
   const [invoiceDateFrom, setInvoiceDateFrom] = useState("");
   const [invoiceDateTo, setInvoiceDateTo] = useState("");
+  const [invoiceCustomerFilter, setInvoiceCustomerFilter] = useState("");
 
   const [selectedInvoiceKeys, setSelectedInvoiceKeys] = useState([]);
   const [hiddenInvoiceKeys, setHiddenInvoiceKeys] = useState([]);
@@ -537,6 +538,7 @@ export default function App() {
   const [packingDateFilterType, setPackingDateFilterType] = useState("created");
   const [packingDateFrom, setPackingDateFrom] = useState("");
   const [packingDateTo, setPackingDateTo] = useState("");
+  const [packingCustomerFilter, setPackingCustomerFilter] = useState("");
   const [quickEntryMode, setQuickEntryMode] = useState(false);
   const [quickInvoiceChecked, setQuickInvoiceChecked] = useState(true);
   const [quickPackingChecked, setQuickPackingChecked] = useState(false);
@@ -819,6 +821,26 @@ export default function App() {
 
   const getInvKey = (inv, idx) => (inv?.savedAt ? `${inv.savedAt}_${inv.meta?.invoiceNo || ""}_${idx}` : `inv_${idx}`);
 
+  const allCustomerOptions = useMemo(() => {
+    const set = new Set();
+    const masterCustomers = loadList("easyinvoice_customers");
+    if (Array.isArray(masterCustomers)) {
+      masterCustomers.forEach((c) => {
+        const name = (typeof c === "string" ? c : c?.name || "").trim();
+        if (name) set.add(name);
+      });
+    }
+    history.forEach((inv) => {
+      const name = (inv.buyer?.name || "").trim();
+      if (name) set.add(name);
+    });
+    packingHistory.forEach((pack) => {
+      const name = (pack.buyer?.name || "").trim();
+      if (name) set.add(name);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [syncCounter, history, packingHistory]);
+
   const processedInvoices = useMemo(() => {
     let list = history.map((inv, idx) => ({ ...inv, _key: getInvKey(inv, idx), _origIdx: idx }));
 
@@ -828,6 +850,11 @@ export default function App() {
 
     if (filterSelectedOnly) {
       list = list.filter((inv) => selectedInvoiceKeys.includes(inv._key));
+    }
+
+    if (invoiceCustomerFilter) {
+      const target = invoiceCustomerFilter.trim().toLowerCase();
+      list = list.filter((inv) => (inv.buyer?.name || "").trim().toLowerCase() === target);
     }
 
     if (invoiceSearchQuery) {
@@ -875,10 +902,15 @@ export default function App() {
     });
 
     return list;
-  }, [history, hiddenInvoiceKeys, filterSelectedOnly, selectedInvoiceKeys, invoiceSearchQuery, invoiceSort, invoiceDateFilterType, invoiceDateFrom, invoiceDateTo]);
+  }, [history, hiddenInvoiceKeys, filterSelectedOnly, selectedInvoiceKeys, invoiceCustomerFilter, invoiceSearchQuery, invoiceSort, invoiceDateFilterType, invoiceDateFrom, invoiceDateTo]);
 
   const processedPacking = useMemo(() => {
     let list = [...packingHistory];
+
+    if (packingCustomerFilter) {
+      const target = packingCustomerFilter.trim().toLowerCase();
+      list = list.filter((pack) => (pack.buyer?.name || "").trim().toLowerCase() === target);
+    }
 
     if (packingSearchQuery) {
       const q = packingSearchQuery.toLowerCase();
@@ -925,7 +957,7 @@ export default function App() {
     });
 
     return list;
-  }, [packingHistory, packingSearchQuery, packingSort, packingDateFilterType, packingDateFrom, packingDateTo]);
+  }, [packingHistory, packingCustomerFilter, packingSearchQuery, packingSort, packingDateFilterType, packingDateFrom, packingDateTo]);
 
   const blankRows = Math.max(0, 5 - items.length);
 
@@ -2025,6 +2057,35 @@ export default function App() {
                     </select>
                   </div>
 
+                  {/* Customer Wise Filter */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 700, color: "#444", fontSize: 12 }}>Customer:</span>
+                    <select
+                      value={invoiceCustomerFilter}
+                      onChange={(e) => setInvoiceCustomerFilter(e.target.value)}
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        border: invoiceCustomerFilter ? "1.5px solid #1c1c1c" : "1px solid #ccc",
+                        borderRadius: 6,
+                        background: invoiceCustomerFilter ? "#f0f4ff" : "#fff",
+                        color: "#1c1c1c",
+                        cursor: "pointer",
+                        outline: "none",
+                        maxWidth: 220,
+                      }}
+                      title="Customer Wise Filter"
+                    >
+                      <option value="">All Customers ({allCustomerOptions.length})</option>
+                      {allCustomerOptions.map((custName) => (
+                        <option key={custName} value={custName}>
+                          {custName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   {/* Period Filter */}
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     <span style={{ fontWeight: 700, color: "#444", fontSize: 12 }}>Filter Period:</span>
@@ -2101,7 +2162,7 @@ export default function App() {
                       />
                     </div>
 
-                    {(invoiceDateFrom || invoiceDateTo || invoiceSort !== "latest_created" || invoiceSearchQuery || filterSelectedOnly || hiddenInvoiceKeys.length > 0) && (
+                    {(invoiceDateFrom || invoiceDateTo || invoiceSort !== "latest_created" || invoiceSearchQuery || invoiceCustomerFilter || filterSelectedOnly || hiddenInvoiceKeys.length > 0) && (
                       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         {hiddenInvoiceKeys.length > 0 && (
                           <button
@@ -2132,6 +2193,7 @@ export default function App() {
                             setInvoiceDateTo("");
                             setInvoiceSort("latest_created");
                             setInvoiceSearchQuery("");
+                            setInvoiceCustomerFilter("");
                             setFilterSelectedOnly(false);
                             setHiddenInvoiceKeys([]);
                           }}
@@ -2158,14 +2220,16 @@ export default function App() {
                   <div style={{ textAlign: "center", padding: "40px 0", color: "#888" }}>
                     <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
                     <p style={{ margin: "0 0 12px", fontSize: 14 }}>
-                      {filterSelectedOnly ? "No invoices currently selected to show." : "No invoices match your search or date filter."}
+                      {filterSelectedOnly ? "No invoices currently selected to show." : "No invoices match your search, customer, or date filter."}
                     </p>
                     <button
                       type="button"
                       onClick={() => {
                         setInvoiceDateFrom("");
                         setInvoiceDateTo("");
+                        setInvoiceSort("latest_created");
                         setInvoiceSearchQuery("");
+                        setInvoiceCustomerFilter("");
                         setFilterSelectedOnly(false);
                         setHiddenInvoiceKeys([]);
                       }}
@@ -2788,6 +2852,35 @@ export default function App() {
                     </select>
                   </div>
 
+                  {/* Customer Wise Filter */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 700, color: "#444", fontSize: 12 }}>Customer:</span>
+                    <select
+                      value={packingCustomerFilter}
+                      onChange={(e) => setPackingCustomerFilter(e.target.value)}
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        border: packingCustomerFilter ? "1.5px solid #1c1c1c" : "1px solid #ccc",
+                        borderRadius: 6,
+                        background: packingCustomerFilter ? "#f0f4ff" : "#fff",
+                        color: "#1c1c1c",
+                        cursor: "pointer",
+                        outline: "none",
+                        maxWidth: 220,
+                      }}
+                      title="Customer Wise Filter"
+                    >
+                      <option value="">All Customers ({allCustomerOptions.length})</option>
+                      {allCustomerOptions.map((custName) => (
+                        <option key={custName} value={custName}>
+                          {custName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   {/* Period Filter */}
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     <span style={{ fontWeight: 700, color: "#444", fontSize: 12 }}>Filter Period:</span>
@@ -2864,7 +2957,7 @@ export default function App() {
                       />
                     </div>
 
-                    {(packingDateFrom || packingDateTo || packingSort !== "latest_created" || packingSearchQuery) && (
+                    {(packingDateFrom || packingDateTo || packingSort !== "latest_created" || packingSearchQuery || packingCustomerFilter) && (
                       <button
                         type="button"
                         onClick={() => {
@@ -2872,6 +2965,7 @@ export default function App() {
                           setPackingDateTo("");
                           setPackingSort("latest_created");
                           setPackingSearchQuery("");
+                          setPackingCustomerFilter("");
                         }}
                         style={{
                           border: "1px solid #d4d4d4",
@@ -2895,14 +2989,16 @@ export default function App() {
                   <div style={{ textAlign: "center", padding: "40px 0", color: "#888" }}>
                     <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
                     <p style={{ margin: "0 0 12px", fontSize: 14 }}>
-                      No packing lists match your search or date filter.
+                      No packing lists match your search, customer, or date filter.
                     </p>
                     <button
                       type="button"
                       onClick={() => {
                         setPackingDateFrom("");
                         setPackingDateTo("");
+                        setPackingSort("latest_created");
                         setPackingSearchQuery("");
+                        setPackingCustomerFilter("");
                       }}
                       style={{
                         padding: "6px 14px",
