@@ -5,7 +5,8 @@ import ManagementMenu from "./ManagementModals";
 import AuthPage from "./AuthPage";
 import { auth, onAuthStateChanged, db } from "./firebase";
 import { doc, onSnapshot, setDoc, updateDoc, deleteField } from "firebase/firestore";
-import { signOut } from "firebase/auth";
+import { recordAuditLog } from "./auditService";
+import LogHistoryView from "./LogHistoryView";
 import "./App.css";
 
 // User-scoped localStorage helpers (UID is set inside App component via _uid)
@@ -94,6 +95,28 @@ function saveToHistory(invoice) {
   }
 
   localStorage.setItem(_key("easyinvoice_history"), JSON.stringify(list.slice(0, 50)));
+
+  // Audit Logging
+  try {
+    const subTotal = (cleanInvoice.items || []).reduce((acc, it) => acc + ((parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0)), 0);
+    const vatAmount = subTotal * ((parseFloat(cleanInvoice.vatPercent) || 0) / 100);
+    const totalAmount = (subTotal + vatAmount).toFixed(2);
+    recordAuditLog({
+      entityType: "Invoice",
+      entityId: newInvNo || "DRAFT",
+      status: dupIdx !== -1 ? "Modified" : "Created",
+      details: {
+        customerName: cleanInvoice.buyer?.name || "",
+        totalAmount,
+        currency: cleanInvoice.meta?.currency || "",
+        itemsCount: (cleanInvoice.items || []).length,
+        source: dupIdx !== -1 ? "Invoice Overwrite / Save" : "Invoice Creation / Save",
+      },
+    });
+  } catch (auditErr) {
+    console.warn("Audit logging interceptor warning:", auditErr);
+  }
+
   return true;
 }
 
@@ -129,6 +152,23 @@ function saveToPackingHistory(packList) {
   }
 
   localStorage.setItem(_key("easyinvoice_packinghistory"), JSON.stringify(list.slice(0, 50)));
+
+  // Audit Logging
+  try {
+    recordAuditLog({
+      entityType: "Packing List",
+      entityId: newInvNo || "DRAFT",
+      status: dupIdx !== -1 ? "Modified" : "Created",
+      details: {
+        customerName: cleanPackList.buyer?.name || "",
+        itemsCount: (cleanPackList.packingItems || []).length,
+        source: dupIdx !== -1 ? "Packing List Overwrite / Save" : "Packing List Creation / Save",
+      },
+    });
+  } catch (auditErr) {
+    console.warn("Audit logging interceptor warning:", auditErr);
+  }
+
   return true;
 }
 
@@ -509,6 +549,7 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [isPackingMode, setIsPackingMode] = useState(false);
   const [showPackingHistory, setShowPackingHistory] = useState(false);
+  const [showLogHistory, setShowLogHistory] = useState(false);
   const [packingHistory, setPackingHistory] = useState([]);
   const [activeOpts, setActiveOpts] = useState(null);
   const [toast, setToast] = useState("");
@@ -523,6 +564,38 @@ export default function App() {
   const [invoiceDateFrom, setInvoiceDateFrom] = useState("");
   const [invoiceDateTo, setInvoiceDateTo] = useState("");
   const [invoiceCustomerFilter, setInvoiceCustomerFilter] = useState("");
+
+  const navigateToLogHistory = () => {
+    setShowLogHistory(true);
+    setShowHistory(false);
+    setShowPackingHistory(false);
+    setQuickEntryMode(false);
+    setIsPackingMode(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const navigateToInvoices = () => {
+    setShowLogHistory(false);
+    setShowHistory(true);
+    setShowPackingHistory(false);
+    setQuickEntryMode(false);
+    setIsPackingMode(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const navigateToPacking = () => {
+    setShowLogHistory(false);
+    setShowHistory(false);
+    setShowPackingHistory(true);
+    setQuickEntryMode(false);
+    setIsPackingMode(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const navigateToEditor = () => {
+    setShowLogHistory(false);
+    setShowHistory(false);
+    setShowPackingHistory(false);
+    setQuickEntryMode(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   const [selectedInvoiceKeys, setSelectedInvoiceKeys] = useState([]);
   const [hiddenInvoiceKeys, setHiddenInvoiceKeys] = useState([]);
@@ -1167,6 +1240,24 @@ export default function App() {
     }
     localStorage.setItem(_key("easyinvoice_packinghistory"), JSON.stringify(list));
     setPackingHistory(list);
+
+    // Audit Logging
+    try {
+      recordAuditLog({
+        entityType: "Packing List",
+        entityId: meta?.invoiceNo || "DRAFT",
+        status: "Modified",
+        details: {
+          customerName: buyer?.name || "",
+          itemsCount: (packingItems || []).length,
+          source: "Packing List Editor / Update",
+        },
+        user,
+      });
+    } catch (auditErr) {
+      console.warn("Audit log interceptor warning:", auditErr);
+    }
+
     showToast("Packing List updated!");
   };
 
@@ -1197,6 +1288,29 @@ export default function App() {
     }
     localStorage.setItem(_key("easyinvoice_history"), JSON.stringify(list));
     setHistory(list);
+
+    // Audit Logging
+    try {
+      const subTotal = (items || []).reduce((acc, it) => acc + ((parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0)), 0);
+      const vatAmount = subTotal * ((parseFloat(vatPercent) || 0) / 100);
+      const totalAmount = (subTotal + vatAmount).toFixed(2);
+      recordAuditLog({
+        entityType: "Invoice",
+        entityId: meta?.invoiceNo || "DRAFT",
+        status: "Modified",
+        details: {
+          customerName: buyer?.name || "",
+          totalAmount,
+          currency: meta?.currency || "",
+          itemsCount: (items || []).length,
+          source: "Invoice Editor / Update",
+        },
+        user,
+      });
+    } catch (auditErr) {
+      console.warn("Audit log interceptor warning:", auditErr);
+    }
+
     showToast("Invoice updated!");
     setShowPackingPrompt(true);
   };
@@ -1252,6 +1366,30 @@ export default function App() {
 
   const deleteHistoryItem = (idx) => {
     const list = loadHistory();
+    const itemToDelete = list[idx];
+    if (itemToDelete) {
+      try {
+        const invNo = itemToDelete.meta?.invoiceNo || "UNKNOWN";
+        const subTotal = (itemToDelete.items || []).reduce((acc, it) => acc + ((parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0)), 0);
+        const vatAmount = subTotal * ((parseFloat(itemToDelete.vatPercent) || 0) / 100);
+        const totalAmount = (subTotal + vatAmount).toFixed(2);
+        recordAuditLog({
+          entityType: "Invoice",
+          entityId: invNo,
+          status: "Deleted",
+          details: {
+            customerName: itemToDelete.buyer?.name || "",
+            totalAmount,
+            currency: itemToDelete.meta?.currency || "",
+            itemsCount: (itemToDelete.items || []).length,
+            source: "Invoices List / Single Delete",
+          },
+          user,
+        });
+      } catch (auditErr) {
+        console.warn("Audit logging interceptor warning:", auditErr);
+      }
+    }
     list.splice(idx, 1);
     localStorage.setItem(_key("easyinvoice_history"), JSON.stringify(list));
     setHistory(list);
@@ -1316,6 +1454,31 @@ export default function App() {
       return;
     }
     const list = loadHistory();
+    const itemsToDelete = list.filter((inv, idx) => selectedInvoiceKeys.includes(getInvKey(inv, idx)));
+    itemsToDelete.forEach((itemToDelete) => {
+      try {
+        const invNo = itemToDelete.meta?.invoiceNo || "UNKNOWN";
+        const subTotal = (itemToDelete.items || []).reduce((acc, it) => acc + ((parseFloat(it.qty) || 0) * (parseFloat(it.rate) || 0)), 0);
+        const vatAmount = subTotal * ((parseFloat(itemToDelete.vatPercent) || 0) / 100);
+        const totalAmount = (subTotal + vatAmount).toFixed(2);
+        recordAuditLog({
+          entityType: "Invoice",
+          entityId: invNo,
+          status: "Deleted",
+          details: {
+            customerName: itemToDelete.buyer?.name || "",
+            totalAmount,
+            currency: itemToDelete.meta?.currency || "",
+            itemsCount: (itemToDelete.items || []).length,
+            source: "Invoices List / Bulk Delete",
+          },
+          user,
+        });
+      } catch (auditErr) {
+        console.warn("Audit logging interceptor warning:", auditErr);
+      }
+    });
+
     const remaining = list.filter((inv, idx) => !selectedInvoiceKeys.includes(getInvKey(inv, idx)));
     localStorage.setItem(_key("easyinvoice_history"), JSON.stringify(remaining));
     setHistory(remaining);
@@ -1794,7 +1957,21 @@ export default function App() {
         </div>
       )}
 
-      {quickEntryMode && (
+      {/* Log History Audit View (Full Screen Dedicated Layout) */}
+      {showLogHistory && (
+        <LogHistoryView
+          user={user}
+          seller={seller}
+          setSeller={setSeller}
+          setBuyer={setBuyer}
+          onBackToInvoices={navigateToInvoices}
+          onBackToPacking={navigateToPacking}
+          onBackToEditor={navigateToEditor}
+          onDataChange={() => setSyncCounter((c) => c + 1)}
+        />
+      )}
+
+      {!showLogHistory && quickEntryMode && (
         <div className="quick-entry-page no-print">
           <div className="quick-entry no-print">
           <div className="quick-entry-card">
@@ -1880,7 +2057,7 @@ export default function App() {
       )}
 
       {/* Invoices List Panel (Full Page View) */}
-      {!quickEntryMode && showHistory && (
+      {!showLogHistory && !quickEntryMode && showHistory && (
         <div
           style={{
             width: "100%",
@@ -1944,7 +2121,26 @@ export default function App() {
               >
                 🔍
               </button>
-              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} onDataChange={() => setSyncCounter((c) => c + 1)} />
+              <button
+                onClick={navigateToLogHistory}
+                style={{
+                  padding: "8px 14px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  border: "1px solid #d1d5db",
+                  borderRadius: 8,
+                  background: "#fff",
+                  color: "#1c1c1c",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+                title="View audit logs history"
+              >
+                📜 Log History
+              </button>
+              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} onLogHistoryClick={navigateToLogHistory} onDataChange={() => setSyncCounter((c) => c + 1)} />
               <button
                 onClick={() => setShowDetailMode((prev) => !prev)}
                 style={{
@@ -2708,7 +2904,7 @@ export default function App() {
       )}
 
       {/* Packing Lists Details Panel */}
-      {!quickEntryMode && showPackingHistory && (
+      {!showLogHistory && !quickEntryMode && showPackingHistory && (
         <div
           style={{
             maxWidth: 1200,
@@ -2769,7 +2965,26 @@ export default function App() {
               >
                 🔍
               </button>
-              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} onDataChange={() => setSyncCounter((c) => c + 1)} />
+              <button
+                onClick={navigateToLogHistory}
+                style={{
+                  padding: "8px 14px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  border: "1px solid #d1d5db",
+                  borderRadius: 8,
+                  background: "#fff",
+                  color: "#1c1c1c",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+                title="View audit logs history"
+              >
+                📜 Log History
+              </button>
+              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} onLogHistoryClick={navigateToLogHistory} onDataChange={() => setSyncCounter((c) => c + 1)} />
               <button onClick={openQuickEntry} style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, border: "1px solid #1a4fa0", borderRadius: 8, background: "#eef4ff", color: "#1a4fa0", cursor: "pointer" }}>⚡ Quick Entry</button>
               <button
                 onClick={() => {
@@ -3118,6 +3333,24 @@ export default function App() {
                             if (pw === "abcd") {
                               const origIdx = packingHistory.indexOf(pack);
                               const list = loadPackingHistory();
+                              const itemToDelete = list[origIdx !== -1 ? origIdx : i];
+                              if (itemToDelete) {
+                                try {
+                                  recordAuditLog({
+                                    entityType: "Packing List",
+                                    entityId: itemToDelete.meta?.invoiceNo || "UNKNOWN",
+                                    status: "Deleted",
+                                    details: {
+                                      customerName: itemToDelete.buyer?.name || "",
+                                      itemsCount: (itemToDelete.packingItems || []).length,
+                                      source: "Packing Lists / Delete",
+                                    },
+                                    user,
+                                  });
+                                } catch (auditErr) {
+                                  console.warn("Audit log interceptor warning:", auditErr);
+                                }
+                              }
                               list.splice(origIdx !== -1 ? origIdx : i, 1);
                               localStorage.setItem(_key("easyinvoice_packinghistory"), JSON.stringify(list));
                               setPackingHistory(list);
@@ -3139,7 +3372,7 @@ export default function App() {
         </div>
       )}
 
-      {!quickEntryMode && !showHistory && !showPackingHistory && (
+      {!showLogHistory && !quickEntryMode && !showHistory && !showPackingHistory && (
         <div
           className="app-layout"
           style={{
@@ -3174,7 +3407,23 @@ export default function App() {
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} onDataChange={() => setSyncCounter((c) => c + 1)} />
+              <button
+                onClick={navigateToLogHistory}
+                style={{
+                  padding: "6px 12px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: "1px solid #d1d5db",
+                  borderRadius: 5,
+                  background: "#fff",
+                  color: "#1c1c1c",
+                  cursor: "pointer",
+                }}
+                title="View audit logs history"
+              >
+                📜 Logs
+              </button>
+              <ManagementMenu uid={user?.uid || ""} sellers={seller} setSellers={setSeller} setBuyer={setBuyer} onPackingListClick={() => { setShowPackingHistory(true); setShowHistory(false); setIsPackingMode(true); }} onInvoiceListClick={() => { setShowHistory(true); setShowPackingHistory(false); setIsPackingMode(false); }} onLogHistoryClick={navigateToLogHistory} onDataChange={() => setSyncCounter((c) => c + 1)} />
               <button
                 onClick={() => {
                   if (isPackingMode) {

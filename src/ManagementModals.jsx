@@ -704,7 +704,7 @@ function TeamMembersModal({ onClose }) {
 function pfx(key) { return (_mgmtUid ? _mgmtUid + "_" : "") + key; }
 let _mgmtUid = "";
 
-export default function ManagementMenu({ uid, onCompany, onCustomer, sellers, setSellers, setBuyer, onPackingListClick, onInvoiceListClick, onDataChange }) {
+export default function ManagementMenu({ uid, onCompany, onCustomer, sellers, setSellers, setBuyer, onPackingListClick, onInvoiceListClick, onLogHistoryClick, onDataChange }) {
   _mgmtUid = uid || "";
   const [open, setOpen] = useState(false);
   const [modal, setModal] = useState(null); // 'company' | 'customers' | 'other' | 'settings' | 'team'
@@ -787,6 +787,14 @@ export default function ManagementMenu({ uid, onCompany, onCustomer, sellers, se
               }} onMouseEnter={(e) => e.target.style.background = "#f5f5f5"}
                  onMouseLeave={(e) => e.target.style.background = "#fff"}>
                 📄 Invoices List
+              </button>
+              <button onClick={() => { setOpen(false); onLogHistoryClick && onLogHistoryClick(); }} style={{
+                display: "block", width: "100%", padding: "10px 16px", fontSize: 13, fontWeight: 500,
+                border: "none", background: "#fff", textAlign: "left", cursor: "pointer",
+                borderBottom: "1px solid #f0f0f0",
+              }} onMouseEnter={(e) => e.target.style.background = "#f5f5f5"}
+                 onMouseLeave={(e) => e.target.style.background = "#fff"}>
+                📜 Log History
               </button>
               <button onClick={() => { setOpen(false); setModal("other"); }} style={{
                 display: "block", width: "100%", padding: "10px 16px", fontSize: 13, fontWeight: 500,
