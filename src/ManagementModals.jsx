@@ -15,11 +15,16 @@ const LS = {
   banks: "easyinvoice_banks",
 };
 
-function load(key) {
-  try { return JSON.parse(localStorage.getItem(pfx(key))) || []; } catch { return []; }
+function pfx(uid, key) {
+  const safeUid = uid || (auth.currentUser?.uid) || "anon";
+  return safeUid + "_" + key;
 }
-function save(key, data) {
-  localStorage.setItem(pfx(key), JSON.stringify(data));
+
+function load(uid, key) {
+  try { return JSON.parse(localStorage.getItem(pfx(uid, key))) || []; } catch { return []; }
+}
+function save(uid, key, data) {
+  localStorage.setItem(pfx(uid, key), JSON.stringify(data));
 }
 
 const modalOverlay = {
@@ -42,12 +47,12 @@ const btn = (bg, extra) => ({
 });
 
 /* ============ Manage Company Details ============ */
-function CompanyModal({ onClose, onApply }) {
-  const saved = (() => { try { return JSON.parse(localStorage.getItem(pfx(LS.company))) || {}; } catch { return {}; } })();
+function CompanyModal({ uid, onClose, onApply }) {
+  const saved = (() => { try { return JSON.parse(localStorage.getItem(pfx(uid, LS.company))) || {}; } catch { return {}; } })();
   const [form, setForm] = useState({ name: saved.name || "", addr1: saved.addr1 || "", addr2: saved.addr2 || "", contact: saved.contact || "", email: saved.email || "", trn: saved.trn || "" });
 
   const [banksList, setBanksList] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(pfx(LS.banks))) || []; } catch { return []; }
+    try { return JSON.parse(localStorage.getItem(pfx(uid, LS.banks))) || []; } catch { return []; }
   });
   const [bankForm, setBankForm] = useState({ accName: "", bankName: "", accNo: "", iban: "", swift: "", address: "" });
   const [editingBankIdx, setEditingBankIdx] = useState(null);
@@ -95,8 +100,8 @@ function CompanyModal({ onClose, onApply }) {
         finalBanks.push(bankForm);
       }
     }
-    localStorage.setItem(pfx(LS.company), JSON.stringify(form));
-    localStorage.setItem(pfx(LS.banks), JSON.stringify(finalBanks));
+    localStorage.setItem(pfx(uid, LS.company), JSON.stringify(form));
+    localStorage.setItem(pfx(uid, LS.banks), JSON.stringify(finalBanks));
     onApply(form);
     onClose();
   };
@@ -179,8 +184,8 @@ function CompanyModal({ onClose, onApply }) {
 }
 
 /* ============ Manage Customers ============ */
-function CustomersModal({ onClose, onSelect }) {
-  const [list, setList] = useState(() => load(LS.customers));
+function CustomersModal({ uid, onClose, onSelect }) {
+  const [list, setList] = useState(() => load(uid, LS.customers));
   const [editing, setEditing] = useState(null);
 
   const empty = { name: "", addr1: "", addr2: "", taxType: "GST", taxNumber: "", gst: "", trn: "", pan: "", contact: "", email: "" };
@@ -201,11 +206,11 @@ function CustomersModal({ onClose, onSelect }) {
       const next = [...list];
       next[editing] = customerToSave;
       setList(next);
-      save(LS.customers, next);
+      save(uid, LS.customers, next);
     } else {
       const next = [...list, customerToSave];
       setList(next);
-      save(LS.customers, next);
+      save(uid, LS.customers, next);
     }
     setForm(empty);
     setEditing(null);
@@ -232,7 +237,7 @@ function CustomersModal({ onClose, onSelect }) {
     }
     const next = list.filter((_, idx) => idx !== i);
     setList(next);
-    save(LS.customers, next);
+    save(uid, LS.customers, next);
     if (editing === i) { setForm(empty); setEditing(null); }
   };
   const selectCustomer = (c) => { onSelect(c); onClose(); };
@@ -353,22 +358,22 @@ const TABS = [
   { key: "qtyUnits", label: "Qty Units", storageKey: LS.qtyUnits, defaultItem: "MTS" },
 ];
 
-function OtherDetailsModal({ onClose }) {
+function OtherDetailsModal({ uid, onClose }) {
   const [tab, setTab] = useState(TABS[0].key);
   const active = TABS.find((t) => t.key === tab);
-  const [items, setItems] = useState(() => load(active.storageKey));
+  const [items, setItems] = useState(() => load(uid, active.storageKey));
   const [newItem, setNewItem] = useState("");
   const [newCurrCode, setNewCurrCode] = useState("");
   const [newCurrSubunit, setNewCurrSubunit] = useState("");
   const [editingIdx, setEditingIdx] = useState(null);
 
   useEffect(() => { 
-    setItems(load(active.storageKey)); 
+    setItems(load(uid, active.storageKey)); 
     setNewItem(""); 
     setNewCurrCode(""); 
     setNewCurrSubunit(""); 
     setEditingIdx(null); 
-  }, [tab]);
+  }, [tab, uid]);
 
   const addItem = () => {
     if (!newItem.trim()) return;
@@ -381,7 +386,7 @@ function OtherDetailsModal({ onClose }) {
       next = [...items, newItem.trim()];
     }
     setItems(next);
-    save(active.storageKey, next);
+    save(uid, active.storageKey, next);
     setNewItem("");
   };
 
@@ -398,7 +403,7 @@ function OtherDetailsModal({ onClose }) {
       next = [...items, { code: cleanCode, subunit: cleanSub }];
     }
     setItems(next);
-    save(active.storageKey, next);
+    save(uid, active.storageKey, next);
     setNewCurrCode("");
     setNewCurrSubunit("");
   };
@@ -411,7 +416,7 @@ function OtherDetailsModal({ onClose }) {
     }
     const next = items.filter((_, idx) => idx !== i);
     setItems(next);
-    save(active.storageKey, next);
+    save(uid, active.storageKey, next);
     if (editingIdx === i) {
       setNewItem("");
       setNewCurrCode("");
@@ -499,15 +504,14 @@ function OtherDetailsModal({ onClose }) {
 
 /* ============ Settings Modal (Logos / Signatures / Stamps) ============ */
 const IMG_KEYS = { logos: "easyinvoice_logos", signatures: "easyinvoice_signatures", stamps: "easyinvoice_stamps" };
-const _imgKey = (k) => pfx(k);
 const PASSWORD = "abcd";
 
-function SettingsModal({ onClose }) {
+function SettingsModal({ uid, onClose }) {
   const [tab, setTab] = useState("logos");
-  const [images, setImages] = useState(() => load(IMG_KEYS[tab]));
+  const [images, setImages] = useState(() => load(uid, IMG_KEYS[tab]));
   const [pw, setPw] = useState("");
 
-  useEffect(() => { setImages(load(IMG_KEYS[tab])); setPw(""); }, [tab]);
+  useEffect(() => { setImages(load(uid, IMG_KEYS[tab])); setPw(""); }, [tab, uid]);
 
   const handleUpload = (e) => {
     const file = e.target.files?.[0];
@@ -517,7 +521,7 @@ function SettingsModal({ onClose }) {
     reader.onload = (ev) => {
       const next = [...images, { id: Date.now(), name: file.name, dataUrl: ev.target.result }];
       setImages(next);
-      save(IMG_KEYS[tab], next);
+      save(uid, IMG_KEYS[tab], next);
     };
     reader.readAsDataURL(file);
   };
@@ -526,7 +530,7 @@ function SettingsModal({ onClose }) {
     if (pw !== PASSWORD) { alert("Enter password 'abcd' to remove"); return; }
     const next = images.filter((img) => img.id !== id);
     setImages(next);
-    save(IMG_KEYS[tab], next);
+    save(uid, IMG_KEYS[tab], next);
     setPw("");
   };
 
@@ -583,10 +587,11 @@ function SettingsModal({ onClose }) {
 }
 
 /* ============ Profile Modal ============ */
-function ProfileModal({ onClose }) {
+function ProfileModal({ uid, onClose }) {
   const user = auth.currentUser;
-  const company = (() => { try { return JSON.parse(localStorage.getItem(pfx("easyinvoice_company"))); } catch { return null; } })();
-  const team = (() => { try { return JSON.parse(localStorage.getItem(pfx("easyinvoice_team"))) || []; } catch { return []; } })();
+  const effectiveUid = uid || user?.uid || "anon";
+  const company = (() => { try { return JSON.parse(localStorage.getItem(pfx(effectiveUid, "easyinvoice_company"))); } catch { return null; } })();
+  const team = (() => { try { return JSON.parse(localStorage.getItem(pfx(effectiveUid, "easyinvoice_team"))) || []; } catch { return []; } })();
 
   return (
     <div style={modalOverlay} onClick={onClose}>
@@ -625,8 +630,8 @@ function ProfileModal({ onClose }) {
 /* ============ Team Members Modal ============ */
 const TEAM_KEY = "easyinvoice_team";
 
-function TeamMembersModal({ onClose }) {
-  const [list, setList] = useState(() => load(TEAM_KEY));
+function TeamMembersModal({ uid, onClose }) {
+  const [list, setList] = useState(() => load(uid, TEAM_KEY));
   const [pw, setPw] = useState("");
   const [form, setForm] = useState({ name: "", email: "", mobile: "" });
   const [editing, setEditing] = useState(null);
@@ -640,11 +645,11 @@ function TeamMembersModal({ onClose }) {
       const next = [...list];
       next[editing] = form;
       setList(next);
-      save(TEAM_KEY, next);
+      save(uid, TEAM_KEY, next);
     } else {
       const next = [...list, form];
       setList(next);
-      save(TEAM_KEY, next);
+      save(uid, TEAM_KEY, next);
     }
     setForm({ name: "", email: "", mobile: "" });
     setEditing(null);
@@ -656,7 +661,7 @@ function TeamMembersModal({ onClose }) {
     if (pw !== "abcd") { alert("Enter password 'abcd'"); return; }
     const next = list.filter((_, idx) => idx !== i);
     setList(next);
-    save(TEAM_KEY, next);
+    save(uid, TEAM_KEY, next);
     if (editing === i) { setForm({ name: "", email: "", mobile: "" }); setEditing(null); }
     setPw("");
   };
@@ -701,11 +706,8 @@ function TeamMembersModal({ onClose }) {
   );
 }
 
-function pfx(key) { return (_mgmtUid ? _mgmtUid + "_" : "") + key; }
-let _mgmtUid = "";
-
 export default function ManagementMenu({ uid, onCompany, onCustomer, sellers, setSellers, setBuyer, onPackingListClick, onInvoiceListClick, onLogHistoryClick, onDataChange }) {
-  _mgmtUid = uid || "";
+  const currentUid = uid || (auth.currentUser?.uid) || "";
   const [open, setOpen] = useState(false);
   const [modal, setModal] = useState(null); // 'company' | 'customers' | 'other' | 'settings' | 'team'
 
@@ -842,12 +844,12 @@ export default function ManagementMenu({ uid, onCompany, onCustomer, sellers, se
       </div>
 
       {/* Modals */}
-      {modal === "company" && <CompanyModal onClose={() => { setModal(null); onDataChange && onDataChange(); }} onApply={handleCompanyApply} />}
-      {modal === "customers" && <CustomersModal onClose={() => { setModal(null); onDataChange && onDataChange(); }} onSelect={handleCustomerSelect} />}
-      {modal === "other" && <OtherDetailsModal onClose={() => { setModal(null); onDataChange && onDataChange(); }} />}
-      {modal === "settings" && <SettingsModal onClose={() => { setModal(null); onDataChange && onDataChange(); }} />}
-      {modal === "team" && <TeamMembersModal onClose={() => { setModal(null); onDataChange && onDataChange(); }} />}
-      {modal === "profile" && <ProfileModal onClose={() => setModal(null)} />}
+      {modal === "company" && <CompanyModal uid={currentUid} onClose={() => { setModal(null); onDataChange && onDataChange(); }} onApply={handleCompanyApply} />}
+      {modal === "customers" && <CustomersModal uid={currentUid} onClose={() => { setModal(null); onDataChange && onDataChange(); }} onSelect={handleCustomerSelect} />}
+      {modal === "other" && <OtherDetailsModal uid={currentUid} onClose={() => { setModal(null); onDataChange && onDataChange(); }} />}
+      {modal === "settings" && <SettingsModal uid={currentUid} onClose={() => { setModal(null); onDataChange && onDataChange(); }} />}
+      {modal === "team" && <TeamMembersModal uid={currentUid} onClose={() => { setModal(null); onDataChange && onDataChange(); }} />}
+      {modal === "profile" && <ProfileModal uid={currentUid} onClose={() => setModal(null)} />}
     </>
   );
 }

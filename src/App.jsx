@@ -424,83 +424,87 @@ function Section({ title, children }) {
   );
 }
 
+const DEFAULT_SELLER = {
+  name: "",
+  addr1: "",
+  addr2: "",
+  trn: "",
+  contactPerson: "",
+  contact: "",
+  email: "",
+};
+
+const DEFAULT_BUYER = {
+  name: "",
+  addr1: "",
+  addr2: "",
+  taxType: "GST",
+  gst: "",
+  trn: "",
+  pan: "",
+  contact: "",
+  email: "",
+};
+
+const DEFAULT_NOTIFY_PARTY = {
+  name: "",
+  addr1: "",
+  addr2: "",
+  taxType: "GST",
+  gst: "",
+  trn: "",
+  pan: "",
+  email: "",
+  contact: "",
+};
+
+const DEFAULT_META = {
+  invoiceNo: "",
+  refNo: "",
+  date: new Date().toISOString().slice(0, 10),
+  supplierPo: "",
+  poDate: "",
+  transportType: "",
+  driverVessel: "",
+  loadingAt: "",
+  finalDestination: "",
+  packing: "",
+  paymentTerms: "",
+  currency: "USD",
+  subunit: "CENTS",
+  originOfGoods: "",
+  amountInWords: "",
+};
+
+const DEFAULT_BANK = {
+  accName: "",
+  bankName: "",
+  accNo: "",
+  iban: "",
+  swift: "",
+  address: "",
+};
+
 export default function App() {
   // ---------- ALL hooks must be before any early return ----------
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  const [seller, setSeller] = useState({
-    name: "AXIOM POLYMER INDUSTRY LLC",
-    addr1: "UMM AL THOOB, NEW IND AREA",
-    addr2: "UMM AL QUWAIN",
-    trn: "101010101010101",
-    contactPerson: "",
-    contact: "+971 58 8576814",
-    email: "",
-  });
-
-  const [buyer, setBuyer] = useState({
-    name: "GOLCHA ASSOCIATES",
-    addr1: "GOLCHA GARDENS, VILLE PARLE",
-    addr2: "MH, THANE",
-    taxType: "GST",
-    gst: "",
-    trn: "",
-    pan: "",
-    contact: "",
-    email: "",
-  });
-
-  const [notifyParty, setNotifyParty] = useState({
-    name: "",
-    addr1: "",
-    addr2: "",
-    taxType: "GST",
-    gst: "",
-    trn: "",
-    pan: "",
-    email: "",
-    contact: "",
-  });
-
+  const [seller, setSeller] = useState(DEFAULT_SELLER);
+  const [buyer, setBuyer] = useState(DEFAULT_BUYER);
+  const [notifyParty, setNotifyParty] = useState(DEFAULT_NOTIFY_PARTY);
   const [containers, setContainers] = useState([]);
+  const [meta, setMeta] = useState(DEFAULT_META);
+  const [bank, setBank] = useState(DEFAULT_BANK);
 
-  const [meta, setMeta] = useState({
-    invoiceNo: "EX/AS/0098/26",
-    refNo: "",
-    date: "2026-06-02",
-    supplierPo: "ALS228989088",
-    poDate: "2026-05-25",
-    transportType: "SEA",
-    driverVessel: "KSL 009",
-    loadingAt: "SAJJA INDUSTRIAL AREA\nU.A.E",
-    finalDestination: "MUNDRA\nINDIA",
-    packing:
-      "40 JUMBO BAGS ON 40 PALLETS STRAPPED\nCONT NO MRSU9998798, SEAL ML-AE88786688",
-    paymentTerms: "30% ADVANCE PAID ON BL\n35% ON LOADING AND SO N\n35% WILL PAY UPON DELIVERY",
-    currency: "USD",
-    subunit: "CENTS",
-    originOfGoods: "U.A.E",
-    amountInWords: "",
-  });
-
-  const [bank, setBank] = useState({
-    accName: "AXIOM POLYMERS INDUSTRY LLC",
-    bankName: "RAS AL KHAIMAH BANK PTSJ",
-    accNo: "3533 73737 838383 838383",
-    iban: "8888 9999 99999 999999 99999999",
-    swift: "",
-    address: "SHARJAH BR",
-  });
-
-  const [vatPercent, setVatPercent] = useState(5);
-  const [advancePercent, setAdvancePercent] = useState(30);
+  const [vatPercent, setVatPercent] = useState(0);
+  const [advancePercent, setAdvancePercent] = useState(0);
 
   const [items, setItems] = useState([
     {
-      description: "PC BOTTLE REGRIND - GRADE B",
-      qty: "26.500",
-      rate: "1120",
+      description: "",
+      qty: "",
+      rate: "",
       per: "MTS",
     },
   ]);
@@ -1505,80 +1509,117 @@ export default function App() {
       try {
         const savedCompany = localStorage.getItem(_uid + "_easyinvoice_company");
         if (savedCompany) {
-          const comp = JSON.parse(savedCompany);
-          setSeller({
-            name: comp.name || "",
-            addr1: comp.addr1 || "",
-            addr2: comp.addr2 || "",
-            trn: comp.trn || "",
-            contactPerson: comp.contact || "",
-            contact: comp.contact || "",
-            email: comp.email || "",
-          });
+          try {
+            const comp = JSON.parse(savedCompany);
+            setSeller({
+              name: comp.name || "",
+              addr1: comp.addr1 || "",
+              addr2: comp.addr2 || "",
+              trn: comp.trn || "",
+              contactPerson: comp.contact || "",
+              contact: comp.contact || "",
+              email: comp.email || "",
+            });
+          } catch {
+            setSeller(DEFAULT_SELLER);
+          }
+        } else {
+          setSeller(DEFAULT_SELLER);
         }
 
         const savedLogo = localStorage.getItem(_uid + "_easyinvoice_selectedLogo");
-        if (savedLogo) setLogo(savedLogo);
+        setLogo(savedLogo || null);
+
         const savedSig = localStorage.getItem(_uid + "_easyinvoice_selectedSignature");
-        if (savedSig) setSignature(savedSig);
+        setSignature(savedSig || null);
+
         const savedStamp = localStorage.getItem(_uid + "_easyinvoice_selectedStamp");
-        if (savedStamp) setStamp(savedStamp);
+        setStamp(savedStamp || null);
 
         const savedLogoW = localStorage.getItem(_uid + "_easyinvoice_logoWidth");
-        if (savedLogoW) setLogoWidth(parseFloat(savedLogoW));
+        setLogoWidth(savedLogoW ? parseFloat(savedLogoW) : 50);
         const savedLogoH = localStorage.getItem(_uid + "_easyinvoice_logoHeight");
-        if (savedLogoH) setLogoHeight(parseFloat(savedLogoH));
+        setLogoHeight(savedLogoH ? parseFloat(savedLogoH) : 14);
 
         const savedSigW = localStorage.getItem(_uid + "_easyinvoice_sigWidth");
-        if (savedSigW) setSigWidth(parseFloat(savedSigW));
+        setSigWidth(savedSigW ? parseFloat(savedSigW) : 35);
         const savedSigH = localStorage.getItem(_uid + "_easyinvoice_sigHeight");
-        if (savedSigH) setSigHeight(parseFloat(savedSigH));
+        setSigHeight(savedSigH ? parseFloat(savedSigH) : 12);
 
         const savedStampW = localStorage.getItem(_uid + "_easyinvoice_stampWidth");
-        if (savedStampW) setStampWidth(parseFloat(savedStampW));
+        setStampWidth(savedStampW ? parseFloat(savedStampW) : 36);
         const savedStampH = localStorage.getItem(_uid + "_easyinvoice_stampHeight");
-        if (savedStampH) setStampHeight(parseFloat(savedStampH));
+        setStampHeight(savedStampH ? parseFloat(savedStampH) : 18);
 
         const savedTitleText = localStorage.getItem(_uid + "_easyinvoice_titleText");
-        if (savedTitleText) setTitleText(savedTitleText);
+        setTitleText(savedTitleText || "COMMERCIAL INVOICE");
         const savedTitleSize = localStorage.getItem(_uid + "_easyinvoice_titleFontSize");
-        if (savedTitleSize) setTitleFontSize(parseFloat(savedTitleSize));
+        setTitleFontSize(savedTitleSize ? parseFloat(savedTitleSize) : 16);
         const savedTitleAlign = localStorage.getItem(_uid + "_easyinvoice_titleAlign");
-        if (savedTitleAlign) setTitleAlign(savedTitleAlign);
+        setTitleAlign(savedTitleAlign || "right");
         const savedTitleX = localStorage.getItem(_uid + "_easyinvoice_titleXOffset");
-        if (savedTitleX) setTitleXOffset(parseFloat(savedTitleX));
+        setTitleXOffset(savedTitleX ? parseFloat(savedTitleX) : 0);
         const savedTitleY = localStorage.getItem(_uid + "_easyinvoice_titleYOffset");
-        if (savedTitleY) setTitleYOffset(parseFloat(savedTitleY));
+        setTitleYOffset(savedTitleY ? parseFloat(savedTitleY) : 0);
 
         const savedInvTheme = localStorage.getItem(_uid + "_easyinvoice_invoiceTheme");
-        if (savedInvTheme) setInvoiceThemeId(savedInvTheme);
+        setInvoiceThemeId(savedInvTheme || "classic");
         const savedPackTheme = localStorage.getItem(_uid + "_easyinvoice_packingTheme");
-        if (savedPackTheme) setPackingThemeId(savedPackTheme);
+        setPackingThemeId(savedPackTheme || "classic");
 
         const savedContainers = localStorage.getItem(_uid + "_easyinvoice_containers");
         if (savedContainers) {
           try {
             setContainers(JSON.parse(savedContainers));
-          } catch {}
+          } catch {
+            setContainers([]);
+          }
+        } else {
+          setContainers([]);
         }
 
         const savedBanks = localStorage.getItem(_uid + "_easyinvoice_banks");
         if (savedBanks) {
-          const banks = JSON.parse(savedBanks);
-          if (Array.isArray(banks) && banks.length > 0) {
-            setBank({
-              accName: banks[0].accName || "",
-              bankName: banks[0].bankName || "",
-              accNo: banks[0].accNo || "",
-              iban: banks[0].iban || "",
-              swift: banks[0].swift || "",
-              address: banks[0].address || "",
-            });
+          try {
+            const banks = JSON.parse(savedBanks);
+            if (Array.isArray(banks) && banks.length > 0) {
+              setBank({
+                accName: banks[0].accName || "",
+                bankName: banks[0].bankName || "",
+                accNo: banks[0].accNo || "",
+                iban: banks[0].iban || "",
+                swift: banks[0].swift || "",
+                address: banks[0].address || "",
+              });
+            } else {
+              setBank(DEFAULT_BANK);
+            }
+          } catch {
+            setBank(DEFAULT_BANK);
           }
+        } else {
+          setBank(DEFAULT_BANK);
         }
-      } catch {}
+      } catch (err) {
+        console.warn("Tenant storage load warning:", err);
+      }
       setHistory(loadHistory());
       setPackingHistory(loadPackingHistory());
+    } else {
+      // User logged out: clean memory state to prevent cross-account bleeding
+      _uid = "anon";
+      setLogo(null);
+      setSignature(null);
+      setStamp(null);
+      setSeller(DEFAULT_SELLER);
+      setBuyer(DEFAULT_BUYER);
+      setNotifyParty(DEFAULT_NOTIFY_PARTY);
+      setContainers([]);
+      setBank(DEFAULT_BANK);
+      setHistory([]);
+      setPackingHistory([]);
+      setSelectedInvoiceKeys([]);
+      setEditingIndex(null);
     }
   }, [user]);
 
@@ -1679,9 +1720,26 @@ export default function App() {
         });
 
         // Sync React States for immediate live updates on screen
-        if (data.easyinvoice_selectedLogo !== undefined) setLogo(data.easyinvoice_selectedLogo);
-        if (data.easyinvoice_selectedSignature !== undefined) setSignature(data.easyinvoice_selectedSignature);
-        if (data.easyinvoice_selectedStamp !== undefined) setStamp(data.easyinvoice_selectedStamp);
+        if (data.easyinvoice_selectedLogo !== undefined) {
+          setLogo(data.easyinvoice_selectedLogo || null);
+        } else {
+          const localL = localStorage.getItem(uid + "_easyinvoice_selectedLogo");
+          setLogo(localL || null);
+        }
+
+        if (data.easyinvoice_selectedSignature !== undefined) {
+          setSignature(data.easyinvoice_selectedSignature || null);
+        } else {
+          const localS = localStorage.getItem(uid + "_easyinvoice_selectedSignature");
+          setSignature(localS || null);
+        }
+
+        if (data.easyinvoice_selectedStamp !== undefined) {
+          setStamp(data.easyinvoice_selectedStamp || null);
+        } else {
+          const localSt = localStorage.getItem(uid + "_easyinvoice_selectedStamp");
+          setStamp(localSt || null);
+        }
 
         if (data.easyinvoice_logoWidth !== undefined) setLogoWidth(Number(data.easyinvoice_logoWidth));
         if (data.easyinvoice_logoHeight !== undefined) setLogoHeight(Number(data.easyinvoice_logoHeight));
@@ -1719,6 +1777,22 @@ export default function App() {
           });
         }
 
+        if (Array.isArray(data.easyinvoice_banks) && data.easyinvoice_banks.length > 0) {
+          const b = data.easyinvoice_banks[0];
+          setBank({
+            accName: b.accName || "",
+            bankName: b.bankName || "",
+            accNo: b.accNo || "",
+            iban: b.iban || "",
+            swift: b.swift || "",
+            address: b.address || "",
+          });
+        }
+
+        if (Array.isArray(data.easyinvoice_containers)) {
+          setContainers(data.easyinvoice_containers);
+        }
+
         if (updatedAny) {
           // Increment sync counter to force App component to re-read datalists from localStorage
           setSyncCounter((prev) => prev + 1);
@@ -1730,7 +1804,7 @@ export default function App() {
         const initialData = {};
         for (let i = 0; i < localStorage.length; i++) {
           const rawKey = localStorage.key(i);
-          if (rawKey.startsWith(uid + "_")) {
+          if (rawKey && rawKey.startsWith(uid + "_")) {
             const cleanKey = rawKey.substring(uid.length + 1);
             const val = localStorage.getItem(rawKey);
             try {
