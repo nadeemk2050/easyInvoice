@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { auth } from "./firebase";
 import { signOut } from "firebase/auth";
+import { compressImage } from "./imageUtils";
 
 const LS = {
   company: "easyinvoice_company",
@@ -24,7 +25,14 @@ function load(uid, key) {
   try { return JSON.parse(localStorage.getItem(pfx(uid, key))) || []; } catch { return []; }
 }
 function save(uid, key, data) {
-  localStorage.setItem(pfx(uid, key), JSON.stringify(data));
+  try {
+    localStorage.setItem(pfx(uid, key), JSON.stringify(data));
+  } catch (err) {
+    console.error("Storage save error:", err);
+    if (err.name === "QuotaExceededError" || err.code === 22) {
+      alert("Storage quota exceeded! Please remove some unused items or images.");
+    }
+  }
 }
 
 const modalOverlay = {
@@ -510,20 +518,32 @@ function SettingsModal({ uid, onClose }) {
   const [tab, setTab] = useState("logos");
   const [images, setImages] = useState(() => load(uid, IMG_KEYS[tab]));
   const [pw, setPw] = useState("");
+  const [uploading, setUploading] = useState(false);
 
-  useEffect(() => { setImages(load(uid, IMG_KEYS[tab])); setPw(""); }, [tab, uid]);
+  useEffect(() => { 
+    setImages(load(uid, IMG_KEYS[tab])); 
+    setPw(""); 
+  }, [tab, uid]);
 
-  const handleUpload = (e) => {
+  const handleUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (images.length >= 3) { alert("Max 3 images allowed"); return; }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const next = [...images, { id: Date.now(), name: file.name, dataUrl: ev.target.result }];
+    e.target.value = "";
+    setUploading(true);
+
+    try {
+      const maxDim = tab === "logos" ? 1200 : 800;
+      const compressedDataUrl = await compressImage(file, { maxWidth: maxDim, maxHeight: maxDim });
+      const next = [...images, { id: Date.now(), name: file.name, dataUrl: compressedDataUrl }];
       setImages(next);
       save(uid, IMG_KEYS[tab], next);
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.error("Failed to upload/compress image:", err);
+      alert("Failed to process image. Please try another image.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const removeImage = (id) => {
@@ -555,9 +575,9 @@ function SettingsModal({ uid, onClose }) {
         {/* Upload */}
         <div style={{ marginBottom: 12 }}>
           <label style={{ display: "inline-block", padding: "8px 16px", fontSize: 12, fontWeight: 600,
-            border: "1px dashed #999", borderRadius: 6, background: "#fafafa", cursor: "pointer" }}>
-            + Upload {tabLabels[tab]}
-            <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleUpload} />
+            border: "1px dashed #999", borderRadius: 6, background: uploading ? "#f0f0f0" : "#fafafa", cursor: uploading ? "wait" : "pointer", opacity: uploading ? 0.7 : 1 }}>
+            {uploading ? "⏳ Compressing & Uploading..." : `+ Upload ${tabLabels[tab]}`}
+            <input type="file" accept="image/*" disabled={uploading} style={{ display: "none" }} onChange={handleUpload} />
           </label>
         </div>
 

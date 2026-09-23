@@ -7,6 +7,7 @@ import { auth, onAuthStateChanged, db } from "./firebase";
 import { doc, onSnapshot, setDoc, updateDoc, deleteField } from "firebase/firestore";
 import { recordAuditLog } from "./auditService";
 import LogHistoryView from "./LogHistoryView";
+import { compressImage, optimizeStoredImages } from "./imageUtils";
 import "./App.css";
 
 // User-scoped localStorage helpers (UID is set inside App component via _uid)
@@ -805,11 +806,18 @@ export default function App() {
     setPdfBusy(false);
   };
 
-  const handleImage = (file, setter) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => setter(e.target.result);
-    reader.readAsDataURL(file);
+  const handleImage = async (file, setter, type = "logo") => {
+    if (!file) return null;
+    try {
+      const maxDim = type === "logo" ? 1200 : 800;
+      const compressed = await compressImage(file, { maxWidth: maxDim, maxHeight: maxDim });
+      if (setter) setter(compressed);
+      return compressed;
+    } catch (err) {
+      console.error("Failed to compress image:", err);
+      showToast("Failed to process image.");
+      return null;
+    }
   };
 
   const updateItem = (i, key, val) => {
@@ -1605,6 +1613,7 @@ export default function App() {
       }
       setHistory(loadHistory());
       setPackingHistory(loadPackingHistory());
+      optimizeStoredImages(user.uid);
     } else {
       // User logged out: clean memory state to prevent cross-account bleeding
       _uid = "anon";
@@ -1632,7 +1641,11 @@ export default function App() {
     const originalRemoveItem = localStorage.removeItem;
 
     localStorage.setItem = function (key, value) {
-      originalSetItem.apply(this, arguments);
+      try {
+        originalSetItem.apply(this, arguments);
+      } catch (storageErr) {
+        console.warn("localStorage quota exceeded in setItem:", storageErr);
+      }
 
       if (window.isSyncingFromFirestore) return;
 
@@ -1664,7 +1677,11 @@ export default function App() {
     };
 
     localStorage.removeItem = function (key) {
-      originalRemoveItem.apply(this, arguments);
+      try {
+        originalRemoveItem.apply(this, arguments);
+      } catch (storageErr) {
+        console.warn("localStorage error in removeItem:", storageErr);
+      }
 
       if (window.isSyncingFromFirestore) return;
 
@@ -1714,7 +1731,11 @@ export default function App() {
           if (localDirty[rawKey]) return;
 
           if (localStorage.getItem(rawKey) !== strVal) {
-            localStorage.setItem(rawKey, strVal);
+            try {
+              localStorage.setItem(rawKey, strVal);
+            } catch (err) {
+              console.warn("Storage sync write error:", err);
+            }
             updatedAny = true;
           }
         });
@@ -3667,11 +3688,14 @@ export default function App() {
                 type="file"
                 accept="image/*"
                 style={{ display: "none" }}
-                onChange={(e) => {
-                  handleImage(e.target.files[0], (dataUrl) => {
-                    setLogo(dataUrl);
-                    localStorage.setItem(_uid + "_easyinvoice_selectedLogo", dataUrl);
-                  });
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  const dataUrl = await handleImage(file, setLogo, "logo");
+                  if (dataUrl) {
+                    try { localStorage.setItem(_uid + "_easyinvoice_selectedLogo", dataUrl); } catch (err) { console.warn(err); }
+                  }
                 }}
               />
             </div>
@@ -3737,11 +3761,14 @@ export default function App() {
                 type="file"
                 accept="image/*"
                 style={{ display: "none" }}
-                onChange={(e) => {
-                  handleImage(e.target.files[0], (dataUrl) => {
-                    setSignature(dataUrl);
-                    localStorage.setItem(_uid + "_easyinvoice_selectedSignature", dataUrl);
-                  });
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  const dataUrl = await handleImage(file, setSignature, "signature");
+                  if (dataUrl) {
+                    try { localStorage.setItem(_uid + "_easyinvoice_selectedSignature", dataUrl); } catch (err) { console.warn(err); }
+                  }
                 }}
               />
             </div>
@@ -3807,11 +3834,14 @@ export default function App() {
                 type="file"
                 accept="image/*"
                 style={{ display: "none" }}
-                onChange={(e) => {
-                  handleImage(e.target.files[0], (dataUrl) => {
-                    setStamp(dataUrl);
-                    localStorage.setItem(_uid + "_easyinvoice_selectedStamp", dataUrl);
-                  });
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  const dataUrl = await handleImage(file, setStamp, "stamp");
+                  if (dataUrl) {
+                    try { localStorage.setItem(_uid + "_easyinvoice_selectedStamp", dataUrl); } catch (err) { console.warn(err); }
+                  }
                 }}
               />
             </div>
@@ -3965,7 +3995,7 @@ export default function App() {
                         onClick={() => {
                           if (imgPw !== "abcd") { alert("Wrong password"); return; }
                           setter(img.dataUrl);
-                          localStorage.setItem(_uid + "_" + storageKey, img.dataUrl);
+                          try { localStorage.setItem(_uid + "_" + storageKey, img.dataUrl); } catch (err) { console.warn(err); }
                           setImgSelector(null);
                           showToast(`${imgSelector} selected permanently!`);
                         }}>
